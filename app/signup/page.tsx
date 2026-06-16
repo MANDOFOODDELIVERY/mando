@@ -103,7 +103,7 @@ export default function Signup() {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="min-h-screen bg-white flex items-center justify-center"
+      className="min-h-screen bg-white p-6 flex items-center justify-center"
     >
       <div className="w-full max-w-[90vw]">
         <h1 className="font-bold text-[24px] text-black">Create Account</h1>
