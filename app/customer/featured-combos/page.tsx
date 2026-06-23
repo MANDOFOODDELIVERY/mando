@@ -89,12 +89,17 @@ const FeaturedMealCombos = () => {
 
             <div className="grid grid-cols-2 gap-6">
               {restaurant.combos.map((combo) => (
-                <ComboCard
+                <Link
                   key={combo.id}
-                  title={combo.title}
-                  price={combo.price}
-                  vendor={combo.vendor}
-                />
+                  href={`/customer/featured-combos/${combo.id}`}
+                  className="block"
+                >
+                  <ComboCard
+                    title={combo.title}
+                    price={combo.price}
+                    vendor={combo.vendor}
+                  />
+                </Link>
               ))}
             </div>
           </section>
