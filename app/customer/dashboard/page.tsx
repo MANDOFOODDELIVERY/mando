@@ -51,7 +51,9 @@ const Dashboard = () => {
       <div className="mt-10">
         <div className="flex items-center justify-between">
           <h2 className="text-[24px] font-semibold">Combos</h2>
-          <p className="text-[18px] text-[#A4A4A4]">See all combos</p>
+          <Link href="/customer/featured-combos" className="text-[18px] text-[#A4A4A4]">
+            See all combos
+          </Link>
         </div>
         <div className="grid grid-cols-2 gap-6 mt-6">
           {[
