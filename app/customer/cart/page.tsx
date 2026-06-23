@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { ArrowLeftIcon } from "@/components/svgs/DefaultIcons";
 import useCartStore from "@/store/cartStore";
+import BottomNav from "@/components/BottomNav";
 
 const CartPage = () => {
   const items = useCartStore((s) => s.items);
   const total = useCartStore((s) => s.total)();
+  const deliveryAddress = useCartStore((s) => s.deliveryAddress);
 
   return (
     <div className="p-4 pb-24 space-y-6">
@@ -21,12 +23,12 @@ const CartPage = () => {
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[14px] text-[#A4A4A4]">Delivery address</p>
-            <p className="font-semibold">No 12, Example Street, Lagos</p>
+            <p className="font-semibold">{deliveryAddress}</p>
             <p className="text-[12px] text-[#A4A4A4]">ETA: 30-45 mins</p>
           </div>
 
           <div className="flex flex-col items-end gap-2">
-            <Link href="#" className="underline text-[#DFB400]">
+            <Link href="/customer/cart/change-address" className="underline text-[#DFB400]">
               Change address
             </Link>
             <Link href="#" className="underline text-[#DFB400]">
@@ -82,6 +84,8 @@ const CartPage = () => {
           Proceed to payment
         </button>
       </section>
+
+      <BottomNav />
     </div>
   );
 };
