@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeftIcon, DefaultUserIcon, GreyedStarIcon, StarIcon } from "@/components/svgs/DefaultIcons";
 import useCartStore from "@/store/cartStore";
+import { useToastStore } from "@/store/toastStore";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -17,16 +18,23 @@ export default function ProfilePage() {
   const [birthday, setBirthday] = useState("");
   const [selectedRating, setSelectedRating] = useState(0);
   const [orders] = useState([
-    { id: "A1B2C3", title: "Amala + Ewedu", date: "2026-06-21", total: "₦2,800", rating: 4 },
-    { id: "D4E5F6", title: "Jollof + Chicken", date: "2026-05-10", total: "₦3,200", rating: 0 },
+    { id: "A1B2C3", title: "Amala + Ewedu", date: "2026-06-21", total: "₦2,800", rating: 4, status: "Delivered" },
+    { id: "D4E5F6", title: "Jollof + Chicken", date: "2026-05-10", total: "₦3,200", rating: 0, status: "On the way" },
   ]);
 
   const [feedback, setFeedback] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+  const showToast = useToastStore((s) => s.showToast);
 
   function saveProfile() {
     setEditing(false);
     // persist if needed
+  }
+
+  function formatBirthdayLabel(date: string) {
+    if (!date) return "No birthday saved yet.";
+    const parsed = new Date(date);
+    return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   }
 
   function logout() {
@@ -62,6 +70,12 @@ export default function ProfilePage() {
                 <div>
                   <h2 className="text-2xl font-semibold text-[#141B34]">{name}</h2>
                   <p className="mt-1 text-sm text-[#6B6B6B]">{email}</p>
+                  {birthday ? (
+                    <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-sm font-medium text-[#141B34] shadow-sm">
+                      <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#DFB400]" />
+                      <span>Birthday saved: {formatBirthdayLabel(birthday)}</span>
+                    </div>
+                  ) : null}
                 </div>
                 <button
                   onClick={() => setEditing(!editing)}
@@ -105,7 +119,7 @@ export default function ProfilePage() {
               />
               <button
                 className="rounded-2xl bg-[#141B34] px-6 py-3 text-sm font-semibold text-white"
-                onClick={() => alert("Birthday saved (placeholder)")}
+                onClick={() => showToast("Birthday saved successfully", "success")}
               >
                 Save birthday
               </button>
@@ -138,9 +152,38 @@ export default function ProfilePage() {
                     <p className="text-sm font-semibold">{o.id}</p>
                   </div>
                 </div>
-                <div className="mt-4 flex items-center justify-between gap-4 text-sm text-[#6B6B6B]">
-                  <p>{o.total}</p>
-                  <span className="rounded-full bg-[#FFF7E0] px-3 py-1 text-xs font-semibold text-[#141B34]">{o.rating ? `${o.rating}★` : "No rating"}</span>
+                <div className="mt-4 grid gap-4">
+                  <div className="flex items-center justify-between gap-4 text-sm text-[#6B6B6B]">
+                    <p>{o.total}</p>
+                    <span className="rounded-full bg-[#FFF7E0] px-3 py-1 text-xs font-semibold text-[#141B34]">{o.rating ? `${o.rating}★` : "No rating"}</span>
+                  </div>
+                  <div className="rounded-3xl bg-[#F9F9F9] p-4">
+                    <p className="text-sm text-[#6B6B6B] mb-3">Order status</p>
+                    <div className="flex items-center gap-2">
+                      {[
+                        { label: "Placed", step: 0 },
+                        { label: "Preparing", step: 1 },
+                        { label: "On the way", step: 2 },
+                        { label: "Delivered", step: 3 },
+                      ].map((step, index) => {
+                        const statusIndex = ["Placed", "Preparing", "On the way", "Delivered"].indexOf(o.status);
+                        const active = index <= statusIndex;
+                        return (
+                          <>
+                            <div key={step.label} className="flex min-w-[58px] flex-col items-center gap-2 text-center">
+                              <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold ${active ? "bg-[#141B34] text-white" : "bg-white text-[#A4A4A4] border border-gray-200"}`}>
+                                {index + 1}
+                              </div>
+                              <p className="max-w-[70px] text-[10px] leading-4 text-[#6B6B6B]">{step.label}</p>
+                            </div>
+                            {index < 3 ? (
+                              <div className={`flex-1 h-px self-center ${index < statusIndex ? "bg-[#141B34]" : "bg-gray-200"}`} />
+                            ) : null}
+                          </>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             ))}
@@ -204,7 +247,9 @@ export default function ProfilePage() {
             <div className="mt-4 flex flex-col gap-3 sm:flex-row">
               <button
                 className="flex-1 rounded-2xl bg-[#141B34] py-3 text-sm font-semibold text-white"
-                onClick={() => alert("Feedback submitted (placeholder)")}
+                onClick={() => {
+                  showToast("Feedback submitted successfully", "success");
+                }}
               >
                 Submit feedback
               </button>
