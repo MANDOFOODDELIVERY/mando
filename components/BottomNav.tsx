@@ -34,11 +34,11 @@ const BottomNav = () => {
       match: "/customer/cart",
     },
     {
-      href: "/customer/address",
-      label: "Address",
+      href: "/customer/profile",
+      label: "Profile",
       icon: FiUser,
       activeIcon: FiUser,
-      match: "/customer/address",
+      match: "/customer/profile",
     },
   ];
 
