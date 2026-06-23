@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowLeftIcon } from "@/components/svgs/DefaultIcons";
+import PhoneNumberModal from "@/components/PhoneNumberModal";
 import useCartStore from "@/store/cartStore";
 import BottomNav from "@/components/BottomNav";
 
 const CartPage = () => {
+  const router = useRouter();
   const items = useCartStore((s) => s.items);
   const total = useCartStore((s) => s.total)();
   const deliveryAddress = useCartStore((s) => s.deliveryAddress);
@@ -88,43 +91,26 @@ const CartPage = () => {
           <span>₦{total.toLocaleString()}</span>
         </div>
 
-        <button className="w-full mt-2 rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-white">
+        <button
+          onClick={() => router.push("/customer/cart/payment")}
+          className="w-full mt-2 rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-white"
+        >
           Proceed to payment
         </button>
       </section>
 
       <BottomNav />
 
-      {/* Phone Number Modal */}
-      {showPhoneModal && (
-        <div className="fixed inset-0 bg-black/50 z-40" onClick={() => setShowPhoneModal(false)} />
-      )}
-
-      <div
-        className={`fixed bottom-0 left-0 right-0 bg-white rounded-t-2xl p-6 z-50 transition-transform duration-300 ${
-          showPhoneModal ? "translate-y-0" : "translate-y-full"
-        }`}
-      >
-        <div className="space-y-4">
-          <h3 className="text-[20px] font-semibold">Add phone number</h3>
-          <input
-            type="tel"
-            value={inputPhone}
-            onChange={(e) => setInputPhone(e.target.value)}
-            placeholder="Enter your phone number"
-            className="w-full border border-gray-300 rounded-md p-4 text-[14px] focus:outline-none focus:border-[#DFB400]"
-          />
-          <button
-            onClick={() => {
-              setPhoneNumber(inputPhone);
-              setShowPhoneModal(false);
-            }}
-            className="w-full bg-[#DFB400] text-white font-semibold py-4 rounded-md"
-          >
-            Save
-          </button>
-        </div>
-      </div>
+      <PhoneNumberModal
+        open={showPhoneModal}
+        phone={inputPhone}
+        onPhoneChange={setInputPhone}
+        onSave={() => {
+          setPhoneNumber(inputPhone);
+          setShowPhoneModal(false);
+        }}
+        onClose={() => setShowPhoneModal(false)}
+      />
     </div>
   );
 };
