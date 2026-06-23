@@ -169,9 +169,9 @@ export const StarIcon = () => (
 
 export const GreyedStarIcon = () => (
   <svg
-    width="44"
-    height="42"
-    viewBox="0 0 44 42"
+    width="14"
+    height="14"
+    viewBox="0 0 14 14"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
   >
@@ -403,5 +403,27 @@ export const BigSearchIcon = () => (
         />
       </filter>
     </defs>
+  </svg>
+);
+
+export const DefaultUserIcon = () => (
+  <svg
+    width="42"
+    height="42"
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5z"
+      stroke="#4D4D4D"
+      strokeWidth="1.5"
+    />
+    <path
+      d="M3 21c0-3.866 3.582-7 9-7s9 3.134 9 7"
+      stroke="#4D4D4D"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+    />
   </svg>
 );
