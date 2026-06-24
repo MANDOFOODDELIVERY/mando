@@ -86,7 +86,9 @@ export default function ForgotPasswordOtp() {
             {values.map((value, index) => (
               <input
                 key={index}
-                ref={(ref) => (inputRefs.current[index] = ref)}
+                ref={(ref) => {
+                  inputRefs.current[index] = ref;
+                }}
                 type="text"
                 inputMode="numeric"
                 maxLength={1}

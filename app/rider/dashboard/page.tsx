@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { FiRefreshCw } from "react-icons/fi";
 import RiderBottomNav from "@/components/RiderBottomNav";
-import { CashBundleIcon, MoneyIcon, TimerIcon } from "@/components/svgs/DefaultIcons";
+import { MoneyIcon, TimerIcon } from "@/components/svgs/DefaultIcons";
 import { useToastStore } from "@/store/toastStore";
 
 export default function RiderDashboard() {

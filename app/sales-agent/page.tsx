@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { CashBundleIcon, CopyIcon, MoneyIcon } from "@/components/svgs/DefaultIcons";

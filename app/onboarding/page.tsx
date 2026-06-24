@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
+import type { Transition } from "framer-motion";
 
 const onboardingItems = [
   {
@@ -54,7 +55,7 @@ export default function Onboarding() {
     router.push("/signup");
   }
 
-  const transition = { duration: 0.5, ease: [0.22, 1, 0.36, 1] };
+  const transition: Transition = { duration: 0.5, ease: [0.22, 1, 0.36, 1] };
 
   return (
     <div className="">
