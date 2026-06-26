@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1782434514765,
+      "tag": "0000_organic_roughhouse",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782434762075,
+      "tag": "0001_yellow_vanisher",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782434950745,
+      "tag": "0002_tiresome_living_tribunal",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782435699616,
+      "tag": "0003_clean_impossible_man",
+      "breakpoints": true
+    }
+  ]
+}
