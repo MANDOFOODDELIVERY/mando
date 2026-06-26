@@ -5,9 +5,14 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { CautionIcon, PasswordIcon, EyeIcon, EyeOffIcon } from "../../components/svgs/DefaultIcons";
+import { useToastStore } from "@/store/toastStore";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 export default function Login() {
   const router = useRouter();
+  const showToast = useToastStore((s) => s.showToast);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -42,12 +47,6 @@ export default function Login() {
     });
   };
 
-  const passwordCriteria = (pw: string) => ({
-    length: pw.length >= 6,
-    number: /\d/.test(pw),
-    uppercase: /[A-Z]/.test(pw),
-  });
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -55,6 +54,7 @@ export default function Login() {
 
     if (!formData.email) {
       setFieldError("email", "Email is required");
+      showToast("Email is required", "error");
       setLoading(false);
       return;
     }
@@ -62,15 +62,19 @@ export default function Login() {
     if (forgotPasswordMode) {
       if (!formData.email.includes("@")) {
         setFieldError("email", "Please enter a valid email address");
+        showToast("Please enter a valid email address", "error");
         setLoading(false);
         return;
       }
 
       try {
         // frontend-only flow: send OTP and navigate
+        showToast("Verification code sent", "success");
         router.push("/forgot-password/otp");
       } catch (err) {
-        setError("Unable to send code. Please try again.");
+        const message = "Unable to send code. Please try again.";
+        setError(message);
+        showToast(message, "error");
       } finally {
         setLoading(false);
       }
@@ -78,32 +82,48 @@ export default function Login() {
       return;
     }
 
-    if (!formData.password) setFieldError("password", "Password is required");
-
-    if (!formData.email || !formData.password) {
-      setLoading(false);
-      return;
-    }
-
-    const criteria = passwordCriteria(formData.password);
-    if (!criteria.length || !criteria.number || !criteria.uppercase) {
-      setFieldError("password", "Password does not meet requirements");
+    if (!formData.password) {
+      setFieldError("password", "Password is required");
+      showToast("Password is required", "error");
       setLoading(false);
       return;
     }
 
     try {
-      // TODO: Replace with actual API call
-      console.log("Login attempt:", formData);
-      // router.push("/dashboard");
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify(formData),
+      });
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setFieldError("email", "Invalid email or password");
+          setFieldError("password", "Invalid email or password");
+        }
+
+        throw new Error(result?.message ?? "Login failed. Please try again.");
+      }
+
+      showToast("Logged in successfully", "success");
+      await new Promise((resolve) => window.setTimeout(resolve, 1200));
+      router.push("/customer/dashboard");
     } catch (err) {
-      setError("Login failed. Please check your credentials.");
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Login failed. Please check your credentials.";
+
+      setError(message);
+      showToast(message, "error");
     } finally {
       setLoading(false);
     }
   };
-
-  const crit = passwordCriteria(formData.password);
 
   return (
     <motion.div
@@ -123,12 +143,6 @@ export default function Login() {
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-4">
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">
-              {error}
-            </div>
-          )}
-
           <div>
             <label className="block text-sm font-medium text-black mb-2">
               Email
@@ -172,28 +186,6 @@ export default function Login() {
                 >
                   {showPassword ? <EyeOffIcon /> : <EyeIcon />}
                 </button>
-              </div>
-
-              {/* Live validation checker */}
-              <div className="mt-2 space-y-1 text-sm">
-                <div className="flex items-center gap-2 text-[#6B7280]">
-                  <CautionIcon color={crit.length ? "#9EA2AD" : "#E53935"} size={14} />
-                  <span className={crit.length ? "text-[#6B7280]" : "text-red-600"}>
-                    At least 6 characters
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <CautionIcon color={crit.number ? "#9EA2AD" : "#E53935"} size={14} />
-                  <span className={crit.number ? "text-[#6B7280]" : "text-red-600"}>
-                    Contains a number
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <CautionIcon color={crit.uppercase ? "#9EA2AD" : "#E53935"} size={14} />
-                  <span className={crit.uppercase ? "text-[#6B7280]" : "text-red-600"}>
-                    Contains an uppercase letter
-                  </span>
-                </div>
               </div>
 
               {fieldErrors.password && (

@@ -117,7 +117,7 @@
 
 ## Frontend Integration
 
-- [ ] Replace login TODO with real auth call.
+- [x] Replace login TODO with real auth call.
 - [x] Replace signup TODO with real auth call.
 - [ ] Replace forgot-password flow with real provider flow.
 - [ ] Replace static restaurant arrays with API/database data.
