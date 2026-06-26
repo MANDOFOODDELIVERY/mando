@@ -71,7 +71,8 @@
 - [x] Add and locally verify an API health endpoint.
 - [x] Auth: signup.
 - [x] Auth: login.
-- [ ] Auth: logout.
+- [x] Auth: current session lookup.
+- [x] Auth: logout.
 - [ ] Auth: password reset request.
 - [ ] Auth: OTP/verification handling.
 - [ ] Customer: profile read/update.

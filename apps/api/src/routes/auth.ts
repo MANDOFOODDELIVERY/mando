@@ -4,7 +4,11 @@ import { z } from 'zod'
 
 import {
   createSessionToken,
+  getSessionTokenFromCookie,
   hashPassword,
+  hashSessionToken,
+  isSessionExpired,
+  serializeClearSessionCookie,
   serializeSessionCookie,
   verifyPassword,
 } from '../auth/index.js'
@@ -217,6 +221,115 @@ export async function authRoutes(app: FastifyInstance) {
       })
     }
   })
+
+  app.get('/me', async (request, reply) => {
+    try {
+      const sessionContext = await getCurrentSessionContext(
+        request.headers.cookie,
+      )
+
+      if (!sessionContext) {
+        return sendUnauthenticated(reply)
+      }
+
+      return reply.status(200).send(sessionContext.authPayload)
+    } catch (error) {
+      request.log.error(error)
+
+      return reply.status(500).send({
+        error: 'current_user_failed',
+        message: 'Unable to load the current user.',
+      })
+    }
+  })
+
+  app.post('/logout', async (request, reply) => {
+    const token = getSessionTokenFromCookie(request.headers.cookie)
+
+    if (token) {
+      await database
+        .update(authSessions)
+        .set({ revokedAt: new Date() })
+        .where(eq(authSessions.tokenHash, hashSessionToken(token)))
+    }
+
+    return reply
+      .status(204)
+      .header('Set-Cookie', serializeClearSessionCookie())
+      .send()
+  })
+}
+
+async function getCurrentSessionContext(cookieHeader: string | undefined) {
+  const token = getSessionTokenFromCookie(cookieHeader)
+
+  if (!token) {
+    return null
+  }
+
+  const [sessionUser] = await database
+    .select({
+      sessionId: authSessions.id,
+      revokedAt: authSessions.revokedAt,
+      expiresAt: authSessions.expiresAt,
+      userId: users.id,
+      email: users.email,
+      status: users.status,
+      createdAt: users.createdAt,
+    })
+    .from(authSessions)
+    .innerJoin(users, eq(authSessions.userId, users.id))
+    .where(eq(authSessions.tokenHash, hashSessionToken(token)))
+    .limit(1)
+
+  if (!sessionUser || sessionUser.revokedAt || isSessionExpired(sessionUser.expiresAt)) {
+    return null
+  }
+
+  if (sessionUser.status === 'suspended' || sessionUser.status === 'disabled') {
+    return null
+  }
+
+  const [profile] = await database
+    .select({
+      fullName: profiles.fullName,
+      phone: profiles.phone,
+      avatarUrl: profiles.avatarUrl,
+    })
+    .from(profiles)
+    .where(eq(profiles.userId, sessionUser.userId))
+    .limit(1)
+
+  const roles = await database
+    .select({
+      role: userRoles.role,
+    })
+    .from(userRoles)
+    .where(eq(userRoles.userId, sessionUser.userId))
+
+  return {
+    sessionId: sessionUser.sessionId,
+    authPayload: {
+      user: {
+        id: sessionUser.userId,
+        email: sessionUser.email,
+        status: sessionUser.status,
+        createdAt: sessionUser.createdAt,
+      },
+      profile,
+      roles: roles.map((userRole) => userRole.role),
+    },
+  }
+}
+
+function sendUnauthenticated(reply: FastifyReply) {
+  return reply
+    .status(401)
+    .header('Set-Cookie', serializeClearSessionCookie())
+    .send({
+      error: 'unauthenticated',
+      message: 'Please log in to continue.',
+    })
 }
 
 function sendInvalidLogin(reply: FastifyReply) {

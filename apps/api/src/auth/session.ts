@@ -30,6 +30,26 @@ export function hashSessionToken(token: string): string {
 export function isSessionExpired(expiresAt: Date, now = new Date()) {
   return expiresAt.getTime() <= now.getTime()
 }
+
+export function getSessionTokenFromCookie(cookieHeader: string | undefined) {
+  if (!cookieHeader) {
+    return null
+  }
+
+  const { sessionCookieName } = getAuthConfig()
+  const cookies = cookieHeader.split(';')
+
+  for (const cookie of cookies) {
+    const [name, ...valueParts] = cookie.trim().split('=')
+
+    if (name === sessionCookieName) {
+      return valueParts.join('=') || null
+    }
+  }
+
+  return null
+}
+
 export function serializeSessionCookie(session: SessionToken) {
   const { sessionCookieName } = getAuthConfig()
   const maxAgeSeconds = Math.max(
@@ -45,6 +65,23 @@ export function serializeSessionCookie(session: SessionToken) {
     'SameSite=Lax',
     `Max-Age=${maxAgeSeconds}`,
     `Expires=${session.expiresAt.toUTCString()}`,
+    secure,
+  ]
+    .filter(Boolean)
+    .join('; ')
+}
+
+export function serializeClearSessionCookie() {
+  const { sessionCookieName } = getAuthConfig()
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
+
+  return [
+    `${sessionCookieName}=`,
+    'HttpOnly',
+    'Path=/',
+    'SameSite=Lax',
+    'Max-Age=0',
+    'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
     secure,
   ]
     .filter(Boolean)
