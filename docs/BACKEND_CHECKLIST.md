@@ -70,7 +70,7 @@
 
 - [x] Add and locally verify an API health endpoint.
 - [x] Auth: signup.
-- [ ] Auth: login.
+- [x] Auth: login.
 - [ ] Auth: logout.
 - [ ] Auth: password reset request.
 - [ ] Auth: OTP/verification handling.

@@ -1,10 +1,12 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
+import { eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 
 import {
   createSessionToken,
   hashPassword,
   serializeSessionCookie,
+  verifyPassword,
 } from '../auth/index.js'
 import { database } from '../db/client.js'
 import { authSessions, profiles, userRoles, users } from '../db/schema.js'
@@ -17,6 +19,11 @@ const signupBodySchema = z.object({
     .min(6)
     .regex(/[A-Z]/, 'Password must include at least one uppercase letter.')
     .regex(/\d/, 'Password must include at least one number.'),
+})
+
+const loginBodySchema = z.object({
+  email: z.email().trim().toLowerCase(),
+  password: z.string().min(1),
 })
 
 export async function authRoutes(app: FastifyInstance) {
@@ -100,6 +107,122 @@ export async function authRoutes(app: FastifyInstance) {
         message: 'Signup failed. Please try again.',
       })
     }
+  })
+
+  app.post('/login', async (request, reply) => {
+    const parsedBody = loginBodySchema.safeParse(request.body)
+
+    if (!parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please enter a valid email and password.',
+        issues: parsedBody.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      })
+    }
+
+    const { email, password } = parsedBody.data
+
+    try {
+      const [existingUser] = await database
+        .select({
+          id: users.id,
+          email: users.email,
+          passwordHash: users.passwordHash,
+          status: users.status,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .where(sql`lower(${users.email}) = ${email}`)
+        .limit(1)
+
+      if (!existingUser) {
+        return sendInvalidLogin(reply)
+      }
+
+      const passwordMatches = await verifyPassword(
+        password,
+        existingUser.passwordHash,
+      )
+
+      if (!passwordMatches) {
+        return sendInvalidLogin(reply)
+      }
+
+      if (
+        existingUser.status === 'suspended' ||
+        existingUser.status === 'disabled'
+      ) {
+        return reply.status(403).send({
+          error: 'account_unavailable',
+          message: 'This account is not available. Please contact support.',
+        })
+      }
+
+      const session = createSessionToken()
+
+      const loginResult = await database.transaction(async (tx) => {
+        await tx.insert(authSessions).values({
+          userId: existingUser.id,
+          tokenHash: session.tokenHash,
+          expiresAt: session.expiresAt,
+        })
+
+        await tx
+          .update(users)
+          .set({ lastLoginAt: new Date() })
+          .where(eq(users.id, existingUser.id))
+
+        const [profile] = await tx
+          .select({
+            fullName: profiles.fullName,
+            phone: profiles.phone,
+            avatarUrl: profiles.avatarUrl,
+          })
+          .from(profiles)
+          .where(eq(profiles.userId, existingUser.id))
+          .limit(1)
+
+        const roles = await tx
+          .select({
+            role: userRoles.role,
+          })
+          .from(userRoles)
+          .where(eq(userRoles.userId, existingUser.id))
+
+        return {
+          user: {
+            id: existingUser.id,
+            email: existingUser.email,
+            status: existingUser.status,
+            createdAt: existingUser.createdAt,
+          },
+          profile,
+          roles: roles.map((userRole) => userRole.role),
+        }
+      })
+
+      return reply
+        .status(200)
+        .header('Set-Cookie', serializeSessionCookie(session))
+        .send(loginResult)
+    } catch (error) {
+      request.log.error(error)
+
+      return reply.status(500).send({
+        error: 'login_failed',
+        message: 'Login failed. Please try again.',
+      })
+    }
+  })
+}
+
+function sendInvalidLogin(reply: FastifyReply) {
+  return reply.status(401).send({
+    error: 'invalid_credentials',
+    message: 'Invalid email or password.',
   })
 }
 
