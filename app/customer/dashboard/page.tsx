@@ -28,6 +28,7 @@ function formatAddress(address: SavedAddress) {
 }
 
 const Dashboard = () => {
+  const unreadCount = useNotificationStore((s) => s.unreadCount());
   const [deliveryAddress, setDeliveryAddress] = useState("Add delivery address");
 
   useEffect(() => {
@@ -75,9 +76,9 @@ const Dashboard = () => {
           <Link href="/customer/notifications" className="bg-[#FFDB431A] w-[49px] h-[49px] rounded-full flex items-center justify-center relative">
             <NotificationIcon />
           </Link>
-          {useNotificationStore((s) => s.unreadCount()) > 0 && (
+          {unreadCount > 0 && (
             <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[18px] items-center justify-center rounded-full bg-[#DFB400] px-1.5 text-[10px] font-semibold text-black">
-              {useNotificationStore((s) => s.unreadCount())}
+              {unreadCount}
             </span>
           )}
         </div>

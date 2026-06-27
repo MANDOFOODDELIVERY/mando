@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon, CopyIcon } from "@/components/svgs/DefaultIcons";
 import useAuthStore from "@/store/authStore";
+import useCartStore from "@/store/cartStore";
 import { useToastStore } from "@/store/toastStore";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 const PAYMENT_DETAILS = [
   { label: "Account name", value: "Mando Food Ltd" },
@@ -13,36 +17,83 @@ const PAYMENT_DETAILS = [
   { label: "Account number", value: "1234567890" },
 ];
 
+type SavedAddress = {
+  id: string;
+  isDefault: boolean;
+};
+
 export default function PaymentPage() {
   const router = useRouter();
   const auth = useAuthStore((s) => s.auth);
   const authLoading = useAuthStore((s) => s.loading);
   const fetchCurrentUser = useAuthStore((s) => s.fetchCurrentUser);
+  const items = useCartStore((s) => s.items);
   const showToast = useToastStore((s) => s.showToast);
+  const [checkingRequirements, setCheckingRequirements] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
-    fetchCurrentUser()
-      .then((currentAuth) => {
+    async function checkPaymentRequirements() {
+      try {
+        const currentAuth = await fetchCurrentUser();
+
         if (!mounted) return;
 
         if (!currentAuth) {
           showToast("Please log in to continue to payment", "error");
           router.replace("/login");
+          return;
         }
-      })
-      .catch(() => {
+
+        if (items.length === 0) {
+          showToast("Your cart is empty", "error");
+          router.replace("/customer/cart");
+          return;
+        }
+
+        const addressResponse = await fetch(`${API_BASE_URL}/customer/addresses`, {
+          credentials: "include",
+        });
+
         if (!mounted) return;
 
-        showToast("Please log in to continue to payment", "error");
-        router.replace("/login");
-      });
+        if (!addressResponse.ok) {
+          showToast("Please add a delivery address", "error");
+          router.replace("/customer/cart/change-address");
+          return;
+        }
+
+        const addressData = (await addressResponse.json()) as { addresses: SavedAddress[] };
+        const hasAddress = addressData.addresses.some((address) => address.isDefault) || addressData.addresses.length > 0;
+
+        if (!hasAddress) {
+          showToast("Please add a delivery address", "error");
+          router.replace("/customer/cart/change-address");
+          return;
+        }
+
+        if (!currentAuth.profile?.phone) {
+          showToast("Please add your phone number", "error");
+          router.replace("/customer/cart");
+          return;
+        }
+      } catch {
+        if (!mounted) return;
+
+        showToast("Please complete your checkout details", "error");
+        router.replace("/customer/cart");
+      } finally {
+        if (mounted) setCheckingRequirements(false);
+      }
+    }
+
+    checkPaymentRequirements();
 
     return () => {
       mounted = false;
     };
-  }, [fetchCurrentUser, router, showToast]);
+  }, [fetchCurrentUser, items.length, router, showToast]);
 
   const copyToClipboard = async (value: string) => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -50,11 +101,11 @@ export default function PaymentPage() {
     }
   };
 
-  if (!auth) {
+  if (!auth || checkingRequirements) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F8F8F8] p-6">
         <p className="text-sm font-medium text-[#6B6B6B]">
-          {authLoading ? "Checking your session..." : "Redirecting to login..."}
+          {authLoading || checkingRequirements ? "Checking payment details..." : "Redirecting..."}
         </p>
       </div>
     );
@@ -104,7 +155,7 @@ export default function PaymentPage() {
           onClick={() => router.push("/customer/cart/payment-processing")}
           className="w-full rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-black"
         >
-          I've made the payment
+          I&apos;ve made the payment
         </button>
       </div>
     </div>
