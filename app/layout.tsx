@@ -35,7 +35,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#ffffff" />
       </head>
       <body className="min-h-screen flex flex-col items-center justify-start">
-        <div className="w-full min-h-screen mx-auto bg-white">
+        <div className="w-full lg:max-w-[420px] min-h-screen mx-auto bg-white">
           {children}
         </div>
         <ToastContainer />

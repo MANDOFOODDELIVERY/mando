@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { CautionIcon, PasswordIcon, EyeIcon, EyeOffIcon } from "../../components/svgs/DefaultIcons";
+import { useAuthStore } from "@/store/authStore";
 import { useToastStore } from "@/store/toastStore";
 
 const API_BASE_URL =
@@ -12,6 +13,7 @@ const API_BASE_URL =
 
 export default function Login() {
   const router = useRouter();
+  const setAuth = useAuthStore((s) => s.setAuth);
   const showToast = useToastStore((s) => s.showToast);
   const [formData, setFormData] = useState({
     email: "",
@@ -109,6 +111,7 @@ export default function Login() {
         throw new Error(result?.message ?? "Login failed. Please try again.");
       }
 
+      setAuth(result);
       showToast("Logged in successfully", "success");
       await new Promise((resolve) => window.setTimeout(resolve, 1200));
       router.push("/customer/dashboard");

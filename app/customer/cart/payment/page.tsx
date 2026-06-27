@@ -1,8 +1,11 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeftIcon, CopyIcon } from "@/components/svgs/DefaultIcons";
+import useAuthStore from "@/store/authStore";
+import { useToastStore } from "@/store/toastStore";
 
 const PAYMENT_DETAILS = [
   { label: "Account name", value: "Mando Food Ltd" },
@@ -12,12 +15,50 @@ const PAYMENT_DETAILS = [
 
 export default function PaymentPage() {
   const router = useRouter();
+  const auth = useAuthStore((s) => s.auth);
+  const authLoading = useAuthStore((s) => s.loading);
+  const fetchCurrentUser = useAuthStore((s) => s.fetchCurrentUser);
+  const showToast = useToastStore((s) => s.showToast);
+
+  useEffect(() => {
+    let mounted = true;
+
+    fetchCurrentUser()
+      .then((currentAuth) => {
+        if (!mounted) return;
+
+        if (!currentAuth) {
+          showToast("Please log in to continue to payment", "error");
+          router.replace("/login");
+        }
+      })
+      .catch(() => {
+        if (!mounted) return;
+
+        showToast("Please log in to continue to payment", "error");
+        router.replace("/login");
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [fetchCurrentUser, router, showToast]);
 
   const copyToClipboard = async (value: string) => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       await navigator.clipboard.writeText(value);
     }
   };
+
+  if (!auth) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8F8F8] p-6">
+        <p className="text-sm font-medium text-[#6B6B6B]">
+          {authLoading ? "Checking your session..." : "Redirecting to login..."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F8F8F8] pb-28">

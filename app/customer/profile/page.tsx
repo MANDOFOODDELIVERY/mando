@@ -1,21 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeftIcon, DefaultUserIcon, GreyedStarIcon, StarIcon } from "@/components/svgs/DefaultIcons";
+import useAuthStore from "@/store/authStore";
 import useCartStore from "@/store/cartStore";
 import { useToastStore } from "@/store/toastStore";
+import BottomNav from "@/components/BottomNav";
 
 export default function ProfilePage() {
   const router = useRouter();
   const cartCount = useCartStore((s) => s.items.length);
+  const auth = useAuthStore((s) => s.auth);
+  const authLoading = useAuthStore((s) => s.loading);
+  const fetchCurrentUser = useAuthStore((s) => s.fetchCurrentUser);
+  const logoutAuth = useAuthStore((s) => s.logout);
 
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState("John Doe");
-  const [email, setEmail] = useState("john@example.com");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [birthday, setBirthday] = useState("");
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [orders] = useState([
     { id: "A1B2C3", title: "Amala + Ewedu", date: "2026-06-21", total: "₦2,800", rating: 4, status: "Delivered" },
@@ -25,6 +33,44 @@ export default function ProfilePage() {
   const [feedback, setFeedback] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const showToast = useToastStore((s) => s.showToast);
+
+  useEffect(() => {
+    let mounted = true;
+
+    setCheckingAuth(true);
+
+    fetchCurrentUser()
+      .then((currentAuth) => {
+        if (!mounted) return;
+
+        if (!currentAuth) {
+          showToast("Please log in to continue", "error");
+          router.replace("/login");
+        }
+      })
+      .catch(() => {
+        if (!mounted) return;
+
+        showToast("Unable to load your profile", "error");
+        router.replace("/login");
+      })
+      .finally(() => {
+        if (!mounted) return;
+
+        setCheckingAuth(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [fetchCurrentUser, router, showToast]);
+
+  useEffect(() => {
+    if (!auth) return;
+
+    setName(auth.profile?.fullName ?? "");
+    setEmail(auth.user.email);
+  }, [auth]);
 
   function saveProfile() {
     setEditing(false);
@@ -37,11 +83,33 @@ export default function ProfilePage() {
     return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   }
 
-  function logout() {
-    if (typeof window !== "undefined") {
-      localStorage.clear();
+  async function logout() {
+    setLoggingOut(true);
+
+    try {
+      await logoutAuth();
+
+      if (typeof window !== "undefined") {
+        localStorage.clear();
+      }
+
+      showToast("Logged out successfully", "success");
+      router.push("/login");
+    } catch {
+      showToast("Logout failed. Please try again.", "error");
+    } finally {
+      setLoggingOut(false);
     }
-    router.push("/login");
+  }
+
+  if (!auth) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8F8F8] p-6">
+        <p className="text-sm font-medium text-[#6B6B6B]">
+          {checkingAuth || authLoading ? "Checking your session..." : "Redirecting to login..."}
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -68,8 +136,8 @@ export default function ProfilePage() {
             <div className="flex-1">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-semibold text-[#141B34]">{name}</h2>
-                  <p className="mt-1 text-sm text-[#6B6B6B]">{email}</p>
+                  <h2 className="text-2xl font-semibold text-[#141B34]">{name || (authLoading ? "Loading..." : "Customer")}</h2>
+                  <p className="mt-1 text-sm text-[#6B6B6B]">{email || "No email loaded"}</p>
                   {birthday ? (
                     <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-sm font-medium text-[#141B34] shadow-sm">
                       <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#DFB400]" />
@@ -169,8 +237,8 @@ export default function ProfilePage() {
                         const statusIndex = ["Placed", "Preparing", "On the way", "Delivered"].indexOf(o.status);
                         const active = index <= statusIndex;
                         return (
-                          <>
-                            <div key={step.label} className="flex min-w-[58px] flex-col items-center gap-2 text-center">
+                          <Fragment key={step.label}>
+                            <div className="flex min-w-[58px] flex-col items-center gap-2 text-center">
                               <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-semibold ${active ? "bg-[#141B34] text-white" : "bg-white text-[#A4A4A4] border border-gray-200"}`}>
                                 {index + 1}
                               </div>
@@ -179,7 +247,7 @@ export default function ProfilePage() {
                             {index < 3 ? (
                               <div className={`flex-1 h-px self-center ${index < statusIndex ? "bg-[#141B34]" : "bg-gray-200"}`} />
                             ) : null}
-                          </>
+                          </Fragment>
                         );
                       })}
                     </div>
@@ -268,11 +336,13 @@ export default function ProfilePage() {
         </section>
 
         <div className="mb-20">
-          <button onClick={logout} className="w-full rounded-2xl bg-[#E53E3E] py-4 text-sm font-semibold text-white shadow-sm">
-            Logout
+          <button disabled={loggingOut} onClick={logout} className="w-full rounded-2xl bg-[#E53E3E] py-4 text-sm font-semibold text-white shadow-sm disabled:opacity-60">
+            {loggingOut ? "Logging out..." : "Logout"}
           </button>
         </div>
       </div>
+
+      <BottomNav />
     </motion.div>
   );
 }

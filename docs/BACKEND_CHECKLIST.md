@@ -123,7 +123,7 @@
 - [ ] Replace forgot-password flow with real provider flow.
 - [ ] Replace static restaurant arrays with API/database data.
 - [ ] Replace static combo arrays with API/database data.
-- [ ] Replace local/profile placeholder data with authenticated profile data.
+- [x] Replace local/profile placeholder data with authenticated profile data.
 - [ ] Wire customer cart checkout to backend order creation.
 - [ ] Wire payment success/failure pages to real payment verification.
 - [ ] Wire rider dashboard to assigned deliveries.
