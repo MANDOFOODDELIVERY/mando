@@ -3,6 +3,7 @@
 import ComboCard from "@/components/cards/ComboCard";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import {
   LocationIcon,
   NotificationIcon,
@@ -10,7 +11,51 @@ import {
 } from "@/components/svgs/DefaultIcons";
 import useNotificationStore from "@/store/notificationStore";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+
+type SavedAddress = {
+  id: string;
+  streetAddress: string;
+  isDefault: boolean;
+  serviceArea: {
+    name: string;
+  };
+};
+
+function formatAddress(address: SavedAddress) {
+  return `${address.streetAddress}, ${address.serviceArea.name}`;
+}
+
 const Dashboard = () => {
+  const [deliveryAddress, setDeliveryAddress] = useState("Add delivery address");
+
+  useEffect(() => {
+    let mounted = true;
+
+    fetch(`${API_BASE_URL}/customer/addresses`, {
+      credentials: "include",
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+
+        return response.json() as Promise<{ addresses: SavedAddress[] }>;
+      })
+      .then((data) => {
+        if (!mounted || !data) return;
+
+        const defaultAddress = data.addresses.find((address) => address.isDefault) ?? data.addresses[0];
+
+        if (defaultAddress) {
+          setDeliveryAddress(formatAddress(defaultAddress));
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   return (
     <div className="p-6 pb-28">
       {/* Header */}
@@ -21,8 +66,8 @@ const Dashboard = () => {
           </div>
           <div className="flex flex-col">
             <p className="text-[14px] text-[#A4A4A4]">Delivery to</p>
-            <h2 className="text-[16px] font-semibold">
-              123 Ajose Adeogun Street...
+            <h2 className="max-w-[190px] truncate text-[16px] font-semibold">
+              {deliveryAddress}
             </h2>
           </div>
         </Link>

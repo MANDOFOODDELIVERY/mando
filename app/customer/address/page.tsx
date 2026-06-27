@@ -16,31 +16,57 @@ type ServiceArea = {
   state: string;
 };
 
+type SavedAddress = {
+  id: string;
+  label: string;
+  streetAddress: string;
+  isDefault: boolean;
+  serviceArea: ServiceArea;
+};
+
+function formatAddress(address: SavedAddress) {
+  return `${address.streetAddress}, ${address.serviceArea.name}`;
+}
+
 export default function AddressPage() {
   const router = useRouter();
   const showToast = useToastStore((s) => s.showToast);
   const [serviceAreas, setServiceAreas] = useState<ServiceArea[]>([]);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [selectedServiceAreaId, setSelectedServiceAreaId] = useState("");
   const [street, setStreet] = useState("");
   const [loadingAreas, setLoadingAreas] = useState(true);
   const [saving, setSaving] = useState(false);
 
   const selectedServiceArea = serviceAreas.find((area) => area.id === selectedServiceAreaId);
+  const addressPreview = street.trim() && selectedServiceArea
+    ? `${street.trim()}, ${selectedServiceArea.name}`
+    : "";
 
   useEffect(() => {
     let mounted = true;
 
-    fetch(`${API_BASE_URL}/customer/service-areas`)
-      .then(async (response) => {
+    Promise.all([
+      fetch(`${API_BASE_URL}/customer/service-areas`).then(async (response) => {
         if (!response.ok) throw new Error("Unable to load delivery locations");
 
         return response.json() as Promise<{ serviceAreas: ServiceArea[] }>;
-      })
-      .then((data) => {
+      }),
+      fetch(`${API_BASE_URL}/customer/addresses`, {
+        credentials: "include",
+      }).then(async (response) => {
+        if (response.status === 401) return { addresses: [] as SavedAddress[] };
+        if (!response.ok) throw new Error("Unable to load saved addresses");
+
+        return response.json() as Promise<{ addresses: SavedAddress[] }>;
+      }),
+    ])
+      .then(([serviceAreaData, addressData]) => {
         if (!mounted) return;
 
-        setServiceAreas(data.serviceAreas);
-        setSelectedServiceAreaId(data.serviceAreas[0]?.id ?? "");
+        setServiceAreas(serviceAreaData.serviceAreas);
+        setSelectedServiceAreaId(serviceAreaData.serviceAreas[0]?.id ?? "");
+        setSavedAddresses(addressData.addresses);
       })
       .catch((error) => {
         if (!mounted) return;
@@ -103,6 +129,16 @@ export default function AddressPage() {
       }
 
       showToast("Address saved successfully", "success");
+      await fetch(`${API_BASE_URL}/customer/addresses`, {
+        credentials: "include",
+      })
+        .then(async (response) => {
+          if (!response.ok) return null;
+          return response.json() as Promise<{ addresses: SavedAddress[] }>;
+        })
+        .then((data) => {
+          if (data) setSavedAddresses(data.addresses);
+        });
       router.push("/customer/dashboard");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to save address", "error");
@@ -146,6 +182,29 @@ export default function AddressPage() {
         </div>
       </section>
 
+      {savedAddresses.length > 0 ? (
+        <section className="mb-8">
+          <h3 className="text-sm text-[#A4A4A4] mb-3">Saved addresses</h3>
+          <div className="space-y-3">
+            {savedAddresses.map((address) => (
+              <div key={address.id} className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-[#141B34]">{address.label}</p>
+                    <p className="mt-1 text-sm text-[#4D4D4D]">{formatAddress(address)}</p>
+                  </div>
+                  {address.isDefault ? (
+                    <span className="rounded-full bg-[#FFF7E0] px-3 py-1 text-xs font-semibold text-[#141B34]">
+                      Default
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="mb-8">
         <h3 className="text-sm text-[#A4A4A4] mb-3">Enter your street address</h3>
         <div className="border border-gray-200 rounded-md p-4 relative">
@@ -156,6 +215,11 @@ export default function AddressPage() {
             className="w-full focus:outline-none text-[14px]"
           />
         </div>
+          {addressPreview ? (
+            <p className="mt-3 rounded-xl bg-[#FFF7E0] px-4 py-3 text-sm font-semibold text-[#141B34]">
+              {addressPreview}
+            </p>
+          ) : null}
           <div className="text-sm text-[#A4A4A4] flex justify-end mt-3">Can&apos;t find your location?</div>
       </section>
 

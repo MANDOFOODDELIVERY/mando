@@ -3,6 +3,7 @@
 type PhoneNumberModalProps = {
   open: boolean;
   phone: string;
+  saving?: boolean;
   onPhoneChange: (value: string) => void;
   onSave: () => void;
   onClose: () => void;
@@ -11,6 +12,7 @@ type PhoneNumberModalProps = {
 export default function PhoneNumberModal({
   open,
   phone,
+  saving = false,
   onPhoneChange,
   onSave,
   onClose,
@@ -31,10 +33,11 @@ export default function PhoneNumberModal({
             className="w-full border border-gray-300 rounded-md p-4 text-[14px] focus:outline-none focus:border-[#DFB400]"
           />
           <button
+            disabled={saving}
             onClick={onSave}
-            className="w-full bg-[#DFB400] text-white font-semibold py-4 rounded-md"
+            className="w-full bg-[#DFB400] text-white font-semibold py-4 rounded-md disabled:opacity-60"
           >
-            Save
+            {saving ? "Saving..." : "Save"}
           </button>
         </div>
       </div>

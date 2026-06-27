@@ -385,14 +385,32 @@ export async function customerRoutes(app: FastifyInstance) {
       return sendAddressNotFound(reply)
     }
 
-    await database
-      .delete(addresses)
-      .where(
-        and(
-          eq(addresses.id, parsedParams.data.addressId),
-          eq(addresses.userId, sessionContext.userId),
-        ),
-      )
+    await database.transaction(async (tx) => {
+      await tx
+        .delete(addresses)
+        .where(
+          and(
+            eq(addresses.id, parsedParams.data.addressId),
+            eq(addresses.userId, sessionContext.userId),
+          ),
+        )
+
+      if (existingAddress.isDefault) {
+        const [nextAddress] = await tx
+          .select({ id: addresses.id })
+          .from(addresses)
+          .where(eq(addresses.userId, sessionContext.userId))
+          .orderBy(asc(addresses.createdAt))
+          .limit(1)
+
+        if (nextAddress) {
+          await tx
+            .update(addresses)
+            .set({ isDefault: true, updatedAt: new Date() })
+            .where(eq(addresses.id, nextAddress.id))
+        }
+      }
+    })
 
     return reply.status(204).send()
   })
@@ -430,7 +448,10 @@ function selectUserAddresses(userId: string) {
 
 async function getUserAddress(userId: string, addressId: string) {
   const [address] = await database
-    .select({ id: addresses.id })
+    .select({
+      id: addresses.id,
+      isDefault: addresses.isDefault,
+    })
     .from(addresses)
     .where(and(eq(addresses.id, addressId), eq(addresses.userId, userId)))
     .limit(1)

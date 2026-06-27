@@ -43,6 +43,9 @@ export default function ChangeAddressPage() {
   const [saving, setSaving] = useState(false);
 
   const selectedServiceArea = serviceAreas.find((area) => area.id === selectedServiceAreaId);
+  const addressPreview = street.trim() && selectedServiceArea
+    ? `${street.trim()}, ${selectedServiceArea.name}`
+    : "";
 
   useEffect(() => {
     let mounted = true;
@@ -227,6 +230,11 @@ export default function ChangeAddressPage() {
             className="w-full focus:outline-none text-[14px]"
           />
         </div>
+        {addressPreview ? (
+          <p className="mt-3 rounded-xl bg-[#FFF7E0] px-4 py-3 text-sm font-semibold text-[#141B34]">
+            {addressPreview}
+          </p>
+        ) : null}
         <div className="text-sm text-[#A4A4A4] flex justify-end mt-3">Can&apos;t find your location?</div>
       </section>
 

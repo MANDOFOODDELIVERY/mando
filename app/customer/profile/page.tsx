@@ -9,6 +9,23 @@ import useAuthStore from "@/store/authStore";
 import { useToastStore } from "@/store/toastStore";
 import BottomNav from "@/components/BottomNav";
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+
+type SavedAddress = {
+  id: string;
+  label: string;
+  streetAddress: string;
+  landmark: string | null;
+  isDefault: boolean;
+  serviceArea: {
+    id: string;
+    name: string;
+    city: string;
+    state: string;
+  };
+};
+
 const MONTH_OPTIONS = [
   { value: "01", label: "January" },
   { value: "02", label: "February" },
@@ -53,6 +70,10 @@ function formatBirthdayLabel(value: string | null | undefined) {
   return `${monthLabel} ${Number(day)}`;
 }
 
+function formatAddress(address: SavedAddress) {
+  return `${address.streetAddress}, ${address.serviceArea.name}`;
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const auth = useAuthStore((s) => s.auth);
@@ -64,9 +85,13 @@ export default function ProfilePage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [birthdayMonth, setBirthdayMonth] = useState("");
   const [birthdayDay, setBirthdayDay] = useState("");
   const [editingBirthday, setEditingBirthday] = useState(false);
+  const [addresses, setAddresses] = useState<SavedAddress[]>([]);
+  const [loadingAddresses, setLoadingAddresses] = useState(true);
+  const [deletingAddressId, setDeletingAddressId] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingBirthday, setSavingBirthday] = useState(false);
@@ -110,6 +135,40 @@ export default function ProfilePage() {
     };
   }, [fetchCurrentUser, router, showToast]);
 
+  useEffect(() => {
+    if (!auth) return;
+
+    let mounted = true;
+
+    fetch(`${API_BASE_URL}/customer/addresses`, {
+      credentials: "include",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load saved addresses");
+
+        return response.json() as Promise<{ addresses: SavedAddress[] }>;
+      })
+      .then((data) => {
+        if (!mounted) return;
+
+        setAddresses(data.addresses);
+      })
+      .catch((error) => {
+        if (!mounted) return;
+
+        showToast(error instanceof Error ? error.message : "Unable to load saved addresses", "error");
+      })
+      .finally(() => {
+        if (!mounted) return;
+
+        setLoadingAddresses(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [auth, showToast]);
+
   async function saveProfile() {
     const trimmedName = name.trim();
 
@@ -123,6 +182,7 @@ export default function ProfilePage() {
     try {
       await updateCustomerProfile({
         fullName: trimmedName,
+        phone: phone.trim() || null,
         birthday: getBirthdayValue(birthdayMonth, birthdayDay),
       });
 
@@ -167,6 +227,7 @@ export default function ProfilePage() {
 
     setName(auth.profile?.fullName ?? "");
     setEmail(auth.user.email);
+    setPhone(auth.profile?.phone ?? "");
     setBirthdayMonth(birthdayParts.month);
     setBirthdayDay(birthdayParts.day);
     setEditing(false);
@@ -179,6 +240,7 @@ export default function ProfilePage() {
 
     setName(auth.profile?.fullName ?? "");
     setEmail(auth.user.email);
+    setPhone(auth.profile?.phone ?? "");
     setBirthdayMonth(birthdayParts.month);
     setBirthdayDay(birthdayParts.day);
     setEditing(true);
@@ -199,6 +261,29 @@ export default function ProfilePage() {
     setBirthdayMonth(birthdayParts.month);
     setBirthdayDay(birthdayParts.day);
     setEditingBirthday(true);
+  }
+
+  async function deleteAddress(addressId: string) {
+    setDeletingAddressId(addressId);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customer/addresses/${addressId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to delete address");
+      }
+
+      setAddresses((currentAddresses) => currentAddresses.filter((address) => address.id !== addressId));
+      showToast("Address deleted successfully", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to delete address", "error");
+    } finally {
+      setDeletingAddressId(null);
+    }
   }
 
   async function logout() {
@@ -232,6 +317,7 @@ export default function ProfilePage() {
 
   const displayName = editing ? name : auth.profile?.fullName ?? "";
   const displayEmail = editing ? email : auth.user.email;
+  const displayPhone = editing ? phone : auth.profile?.phone ?? "";
 
   return (
     <motion.div
@@ -262,6 +348,9 @@ export default function ProfilePage() {
                     {displayName || (authLoading ? "Loading..." : "Customer")}
                   </h2>
                   <p className="mt-2 break-all text-sm text-[#6B6B6B]">{displayEmail}</p>
+                  <p className="mt-1 text-sm text-[#6B6B6B]">
+                    {displayPhone || "No phone number saved"}
+                  </p>
                   {auth.profile?.birthday ? (
                     <div className="mt-4 inline-flex max-w-full items-center gap-2 rounded-full bg-white px-3 py-2 text-sm font-semibold text-[#141B34] shadow-sm">
                       <span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#DFB400]" />
@@ -284,6 +373,7 @@ export default function ProfilePage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <input value={name} onChange={(e) => setName(e.target.value)} className="w-full rounded-2xl border border-gray-200 p-4" placeholder="Full name" />
                 <input value={email} readOnly className="w-full rounded-2xl border border-gray-200 bg-gray-50 p-4 text-[#6B6B6B]" aria-label="Email address" />
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} className="w-full rounded-2xl border border-gray-200 p-4" placeholder="Phone number" />
               </div>
               <div className="mt-4 flex flex-col gap-3 sm:flex-row">
                 <button disabled={savingProfile} onClick={saveProfile} className="flex-1 rounded-2xl bg-[#141B34] py-3 text-sm font-semibold text-white disabled:opacity-60">
@@ -421,14 +511,53 @@ export default function ProfilePage() {
         <section className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <h3 className="text-base font-semibold text-[#141B34]">Update address</h3>
-              <p className="text-sm text-[#6B6B6B]">Keep your current delivery address up to date.</p>
+              <h3 className="text-base font-semibold text-[#141B34]">Saved addresses</h3>
+              <p className="text-sm text-[#6B6B6B]">Keep up to 3 delivery addresses ready for checkout.</p>
             </div>
           </div>
           <div className="rounded-[28px] bg-white p-5 shadow-sm border border-gray-200">
-            <p className="text-sm text-[#6B6B6B] mb-4">Your default address is used for checkout every time unless changed.</p>
-            <Link href="/customer/address" className="inline-flex rounded-2xl bg-[#141B34] px-5 py-3 text-sm font-semibold text-white">
-              Manage addresses
+            {loadingAddresses ? (
+              <p className="text-sm text-[#6B6B6B]">Loading saved addresses...</p>
+            ) : null}
+
+            {!loadingAddresses && addresses.length === 0 ? (
+              <p className="text-sm text-[#6B6B6B]">No saved address yet.</p>
+            ) : null}
+
+            {addresses.length > 0 ? (
+              <div className="space-y-3">
+                {addresses.map((address) => (
+                  <div key={address.id} className="rounded-2xl border border-gray-200 bg-[#F9F9F9] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-[#141B34]">{address.label}</p>
+                          {address.isDefault ? (
+                            <span className="rounded-full bg-[#FFF7E0] px-2.5 py-1 text-[11px] font-semibold text-[#141B34]">
+                              Default
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="mt-1 text-sm text-[#4D4D4D]">{formatAddress(address)}</p>
+                        {address.landmark ? (
+                          <p className="mt-1 text-xs text-[#6B6B6B]">{address.landmark}</p>
+                        ) : null}
+                      </div>
+                      <button
+                        disabled={deletingAddressId === address.id}
+                        onClick={() => deleteAddress(address.id)}
+                        className="rounded-xl border border-[#E53E3E] px-3 py-2 text-xs font-semibold text-[#E53E3E] disabled:opacity-60"
+                      >
+                        {deletingAddressId === address.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <Link href="/customer/address" className="mt-4 inline-flex rounded-2xl bg-[#141B34] px-5 py-3 text-sm font-semibold text-white">
+              Add address
             </Link>
           </div>
         </section>

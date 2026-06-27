@@ -24,7 +24,7 @@ type CartState = {
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
-  deliveryAddress: "No 12, Example Street, Lagos",
+  deliveryAddress: "Add delivery address",
   phoneNumber: "",
   addItem: (item) =>
     set((state) => {
