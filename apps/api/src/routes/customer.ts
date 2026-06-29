@@ -11,9 +11,11 @@ import {
   combos,
   deliveries,
   menuItems,
+  notifications,
   orderItemComponents,
   orderItems,
   orderIssues,
+  orderReviews,
   orders,
   orderStatusEvents,
   payments,
@@ -92,6 +94,15 @@ const reportOrderBodySchema = z.object({
   reason: z.string().trim().min(5).max(600),
 })
 
+const notificationParamsSchema = z.object({
+  notificationId: z.uuid(),
+})
+
+const reviewOrderBodySchema = z.object({
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().trim().max(600).nullable().optional(),
+})
+
 const MAX_CUSTOMER_ADDRESSES = 3
 const CUSTOMER_CANCELLABLE_ORDER_STATUSES = [
   'pending_payment',
@@ -133,6 +144,86 @@ export async function customerRoutes(app: FastifyInstance) {
     return reply.status(200).send({
       serviceAreas: activeServiceAreas,
     })
+  })
+
+  app.get('/notifications', async (request, reply) => {
+    const sessionContext = await getCurrentSessionContext(request.headers.cookie)
+
+    if (!sessionContext) {
+      return sendUnauthenticated(reply)
+    }
+
+    const userNotifications = await database
+      .select({
+        id: notifications.id,
+        type: notifications.type,
+        title: notifications.title,
+        body: notifications.body,
+        data: notifications.data,
+        readAt: notifications.readAt,
+        createdAt: notifications.createdAt,
+      })
+      .from(notifications)
+      .where(eq(notifications.userId, sessionContext.userId))
+      .orderBy(desc(notifications.createdAt))
+      .limit(50)
+
+    return reply.status(200).send({
+      notifications: userNotifications,
+      unreadCount: userNotifications.filter((notification) => !notification.readAt).length,
+    })
+  })
+
+  app.patch('/notifications/:notificationId/read', async (request, reply) => {
+    const sessionContext = await getCurrentSessionContext(request.headers.cookie)
+
+    if (!sessionContext) {
+      return sendUnauthenticated(reply)
+    }
+
+    const parsedParams = notificationParamsSchema.safeParse(request.params)
+
+    if (!parsedParams.success) {
+      return sendValidationError(reply, 'Please choose a valid notification.', parsedParams.error.issues)
+    }
+
+    const [notification] = await database
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(
+        and(
+          eq(notifications.id, parsedParams.data.notificationId),
+          eq(notifications.userId, sessionContext.userId),
+        ),
+      )
+      .returning({
+        id: notifications.id,
+        readAt: notifications.readAt,
+      })
+
+    if (!notification) {
+      return reply.status(404).send({
+        error: 'notification_not_found',
+        message: 'Notification not found.',
+      })
+    }
+
+    return reply.status(200).send({ notification })
+  })
+
+  app.post('/notifications/read-all', async (request, reply) => {
+    const sessionContext = await getCurrentSessionContext(request.headers.cookie)
+
+    if (!sessionContext) {
+      return sendUnauthenticated(reply)
+    }
+
+    await database
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(eq(notifications.userId, sessionContext.userId))
+
+    return reply.status(204).send()
   })
 
   app.patch('/profile', async (request, reply) => {
@@ -677,6 +768,14 @@ export async function customerRoutes(app: FastifyInstance) {
         note: 'Order created and awaiting payment.',
       })
 
+      await tx.insert(notifications).values({
+        userId: sessionContext.userId,
+        type: 'order_created',
+        title: 'Order created',
+        body: `Order ${order.orderNumber} has been created and is awaiting payment confirmation.`,
+        data: { orderId: order.id, orderNumber: order.orderNumber },
+      })
+
       return order
     })
 
@@ -718,16 +817,17 @@ export async function customerRoutes(app: FastifyInstance) {
       return sendOrderNotFound(reply)
     }
 
-    const [items, components, timeline, issues, paymentRows] = await Promise.all([
+    const [items, components, timeline, issues, paymentRows, review] = await Promise.all([
       selectOrderItems(order.id),
       selectOrderItemComponents(order.id),
       selectOrderTimeline(order.id),
       selectOrderIssues(order.id),
       selectOrderPayments(order.id),
+      selectOrderReview(order.id),
     ])
 
     return reply.status(200).send({
-      order: serializeOrderDetail(order, items, components, timeline, issues, paymentRows),
+      order: serializeOrderDetail(order, items, components, timeline, issues, paymentRows, review),
     })
   })
 
@@ -794,6 +894,14 @@ export async function customerRoutes(app: FastifyInstance) {
         note: 'Order cancelled by customer.',
       })
 
+      await tx.insert(notifications).values({
+        userId: sessionContext.userId,
+        type: 'order_cancelled',
+        title: 'Order cancelled',
+        body: `Order ${order.orderNumber} has been cancelled.`,
+        data: { orderId: order.id, orderNumber: order.orderNumber },
+      })
+
       return updatedOrder
     })
 
@@ -843,8 +951,78 @@ export async function customerRoutes(app: FastifyInstance) {
         createdAt: orderIssues.createdAt,
       })
 
+    await database.insert(notifications).values({
+      userId: sessionContext.userId,
+      type: 'order_issue_reported',
+      title: 'Issue reported',
+      body: `We received your report for order ${order.orderNumber}.`,
+      data: { orderId: order.id, orderNumber: order.orderNumber, issueId: issue.id },
+    })
+
     return reply.status(201).send({
       issue,
+    })
+  })
+
+  app.post('/orders/:orderId/review', async (request, reply) => {
+    const sessionContext = await getCurrentSessionContext(request.headers.cookie)
+
+    if (!sessionContext) {
+      return sendUnauthenticated(reply)
+    }
+
+    const parsedParams = orderParamsSchema.safeParse(request.params)
+
+    if (!parsedParams.success) {
+      return sendValidationError(reply, 'Please choose a valid order.', parsedParams.error.issues)
+    }
+
+    const parsedBody = reviewOrderBodySchema.safeParse(request.body)
+
+    if (!parsedBody.success) {
+      return sendValidationError(reply, 'Please choose a rating from 1 to 5.', parsedBody.error.issues)
+    }
+
+    const order = await getCustomerOrder(sessionContext.userId, parsedParams.data.orderId)
+
+    if (!order) {
+      return sendOrderNotFound(reply)
+    }
+
+    if (order.status !== 'delivered') {
+      return reply.status(409).send({
+        error: 'order_not_reviewable',
+        message: 'You can review an order after it has been delivered.',
+      })
+    }
+
+    const [review] = await database
+      .insert(orderReviews)
+      .values({
+        orderId: order.id,
+        customerId: sessionContext.userId,
+        restaurantId: order.restaurantId,
+        rating: parsedBody.data.rating,
+        comment: parsedBody.data.comment ?? null,
+      })
+      .onConflictDoUpdate({
+        target: orderReviews.orderId,
+        set: {
+          rating: parsedBody.data.rating,
+          comment: parsedBody.data.comment ?? null,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({
+        id: orderReviews.id,
+        rating: orderReviews.rating,
+        comment: orderReviews.comment,
+        createdAt: orderReviews.createdAt,
+        updatedAt: orderReviews.updatedAt,
+      })
+
+    return reply.status(201).send({
+      review,
     })
   })
 }
@@ -1182,6 +1360,24 @@ function selectOrderPayments(orderId: string) {
 
 type CustomerOrderPayment = Awaited<ReturnType<typeof selectOrderPayments>>[number]
 
+async function selectOrderReview(orderId: string) {
+  const [review] = await database
+    .select({
+      id: orderReviews.id,
+      rating: orderReviews.rating,
+      comment: orderReviews.comment,
+      createdAt: orderReviews.createdAt,
+      updatedAt: orderReviews.updatedAt,
+    })
+    .from(orderReviews)
+    .where(eq(orderReviews.orderId, orderId))
+    .limit(1)
+
+  return review ?? null
+}
+
+type CustomerOrderReview = Awaited<ReturnType<typeof selectOrderReview>>
+
 function serializeOrderDetail(
   order: CustomerOrder,
   items: CustomerOrderItem[],
@@ -1189,6 +1385,7 @@ function serializeOrderDetail(
   timeline: CustomerOrderTimelineEvent[],
   issues: CustomerOrderIssue[],
   paymentRows: CustomerOrderPayment[],
+  review: CustomerOrderReview,
 ) {
   const componentsByOrderItemId = new Map<string, CustomerOrderItemComponent[]>()
 
@@ -1233,6 +1430,7 @@ function serializeOrderDetail(
     timeline,
     issues,
     payments: paymentRows,
+    review,
   }
 }
 

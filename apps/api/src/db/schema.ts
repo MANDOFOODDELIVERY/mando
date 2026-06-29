@@ -694,6 +694,35 @@ export const orderIssues = pgTable(
   ],
 )
 
+export const orderReviews = pgTable(
+  'order_reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    customerId: uuid('customer_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    rating: integer('rating').notNull(),
+    comment: text('comment'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('order_reviews_order_id_unique').on(table.orderId),
+    index('order_reviews_restaurant_id_index').on(table.restaurantId),
+    index('order_reviews_customer_id_index').on(table.customerId),
+    check(
+      'order_reviews_rating_range_check',
+      sql`${table.rating} between 1 and 5`,
+    ),
+  ],
+)
+
 export const payments = pgTable(
   'payments',
   {

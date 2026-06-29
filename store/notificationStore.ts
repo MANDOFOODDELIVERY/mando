@@ -1,28 +1,46 @@
 import create from "zustand";
 
 export type Notification = {
-  id: number;
+  id: string;
+  type: string;
   title: string;
-  description: string;
-  time: string;
-  read?: boolean;
+  body: string;
+  data?: unknown;
+  readAt: string | null;
+  createdAt: string;
 };
 
 type NotificationState = {
   notifications: Notification[];
-  addNotification: (n: Notification) => void;
-  markRead: (id: number) => void;
+  setNotifications: (notifications: Notification[]) => void;
+  addNotification: (notification: Notification) => void;
+  markRead: (id: string) => void;
+  markAllRead: () => void;
   unreadCount: () => number;
 };
 
 export const useNotificationStore = create<NotificationState>((set, get) => ({
-  notifications: [
-    { id: 1, title: "Your order is on the way", description: "The rider is picking up your meal from Mama Chef Cafe.", time: "2 mins ago", read: false },
-    { id: 2, title: "New combo available", description: "Try the new Suya Rice combo at a special launch price.", time: "1 hour ago", read: false },
-  ],
-  addNotification: (n) => set((s) => ({ notifications: [n, ...s.notifications] })),
-  markRead: (id) => set((s) => ({ notifications: s.notifications.map((x) => (x.id === id ? { ...x, read: true } : x)) })),
-  unreadCount: () => get().notifications.filter((n) => !n.read).length,
+  notifications: [],
+  setNotifications: (notifications) => set({ notifications }),
+  addNotification: (notification) =>
+    set((state) => ({ notifications: [notification, ...state.notifications] })),
+  markRead: (id) =>
+    set((state) => ({
+      notifications: state.notifications.map((notification) =>
+        notification.id === id
+          ? { ...notification, readAt: notification.readAt ?? new Date().toISOString() }
+          : notification,
+      ),
+    })),
+  markAllRead: () =>
+    set((state) => ({
+      notifications: state.notifications.map((notification) => ({
+        ...notification,
+        readAt: notification.readAt ?? new Date().toISOString(),
+      })),
+    })),
+  unreadCount: () =>
+    get().notifications.filter((notification) => !notification.readAt).length,
 }));
 
 export default useNotificationStore;

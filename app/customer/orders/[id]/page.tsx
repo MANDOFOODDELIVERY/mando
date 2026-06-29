@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import ConfirmationModal from "@/components/ConfirmationModal";
 import { ArrowLeftIcon } from "@/components/svgs/DefaultIcons";
 import { useToastStore } from "@/store/toastStore";
 
@@ -65,6 +66,11 @@ type OrderDetail = {
     amount: number;
     currency: string;
   }>;
+  review: {
+    id: string;
+    rating: number;
+    comment: string | null;
+  } | null;
 };
 
 function formatNaira(amount: number) {
@@ -99,8 +105,12 @@ export default function OrderDetailPage({
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [cancelling, setCancelling] = useState(false);
+  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [reportReason, setReportReason] = useState("");
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   async function loadOrder() {
     const response = await fetch(`${API_BASE_URL}/customer/orders/${id}`, {
@@ -140,7 +150,7 @@ export default function OrderDetailPage({
   }, [id]);
 
   async function cancelOrder() {
-    if (!order || !window.confirm("Cancel this order?")) return;
+    if (!order) return;
 
     setCancelling(true);
 
@@ -205,6 +215,42 @@ export default function OrderDetailPage({
       showToast(error instanceof Error ? error.message : "Unable to report issue", "error");
     } finally {
       setReporting(false);
+    }
+  }
+
+  async function submitReview() {
+    if (!order || selectedRating === 0) {
+      showToast("Please choose a rating", "error");
+      return;
+    }
+
+    setSubmittingReview(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customer/orders/${order.id}/review`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          rating: selectedRating,
+          comment: reviewComment.trim() || null,
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as { message?: string } | null;
+
+      if (!response.ok) {
+        throw new Error(data?.message ?? "Unable to submit review");
+      }
+
+      showToast("Review submitted successfully", "success");
+      await loadOrder();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to submit review", "error");
+    } finally {
+      setSubmittingReview(false);
     }
   }
 
@@ -323,7 +369,7 @@ export default function OrderDetailPage({
           <button
             type="button"
             disabled={cancelling}
-            onClick={cancelOrder}
+            onClick={() => setShowCancelConfirmation(true)}
             className="mb-4 w-full rounded-2xl border border-[#E53E3E] py-3 text-sm font-semibold text-[#E53E3E] disabled:opacity-60"
           >
             {cancelling ? "Cancelling..." : "Cancel order"}
@@ -359,6 +405,68 @@ export default function OrderDetailPage({
           </div>
         ) : null}
       </section>
+
+      {order.status === "delivered" ? (
+        <section className="mb-5 rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 text-base font-semibold text-[#141B34]">Rate this order</h2>
+          {order.review ? (
+            <div className="rounded-2xl bg-[#F9F9F9] p-4">
+              <p className="font-semibold text-[#141B34]">{order.review.rating} out of 5</p>
+              {order.review.comment ? (
+                <p className="mt-2 text-sm text-[#6B6B6B]">{order.review.comment}</p>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <div className="mb-4 flex gap-2">
+                {[1, 2, 3, 4, 5].map((rating) => (
+                  <button
+                    key={rating}
+                    type="button"
+                    onClick={() => setSelectedRating(rating)}
+                    className={`h-11 w-11 rounded-full text-sm font-semibold ${
+                      selectedRating >= rating
+                        ? "bg-[#DFB400] text-black"
+                        : "bg-[#F3F3F3] text-[#A4A4A4]"
+                    }`}
+                  >
+                    {rating}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={reviewComment}
+                onChange={(event) => setReviewComment(event.target.value)}
+                rows={4}
+                placeholder="Leave a short review"
+                className="w-full rounded-2xl border border-gray-200 bg-[#F9F9F9] p-4 text-sm text-[#141B34]"
+              />
+              <button
+                type="button"
+                disabled={submittingReview}
+                onClick={submitReview}
+                className="mt-3 w-full rounded-2xl bg-[#141B34] py-3 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {submittingReview ? "Submitting..." : "Submit review"}
+              </button>
+            </>
+          )}
+        </section>
+      ) : null}
+
+      <ConfirmationModal
+        open={showCancelConfirmation}
+        title="Cancel order?"
+        description="This will stop the order before the restaurant starts processing it. You can report an issue instead if the order is already in progress."
+        confirmLabel="Cancel order"
+        confirming={cancelling}
+        danger
+        onClose={() => setShowCancelConfirmation(false)}
+        onConfirm={() => {
+          setShowCancelConfirmation(false);
+          void cancelOrder();
+        }}
+      />
     </div>
   );
 }

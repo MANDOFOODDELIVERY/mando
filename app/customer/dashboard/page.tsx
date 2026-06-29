@@ -3,6 +3,8 @@
 import ComboCard from "@/components/cards/ComboCard";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import {
   LocationIcon,
@@ -42,10 +44,13 @@ function formatNaira(amount: number) {
 }
 
 const Dashboard = () => {
+  const router = useRouter();
   const unreadCount = useNotificationStore((s) => s.unreadCount());
+  const setNotifications = useNotificationStore((s) => s.setNotifications);
   const [deliveryAddress, setDeliveryAddress] = useState("Add delivery address");
   const [combos, setCombos] = useState<ComboSummary[]>([]);
   const [combosLoading, setCombosLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -92,10 +97,34 @@ const Dashboard = () => {
         setCombosLoading(false);
       });
 
+    fetch(`${API_BASE_URL}/customer/notifications`, {
+      credentials: "include",
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+
+        return response.json() as Promise<{ notifications: Parameters<typeof setNotifications>[0] }>;
+      })
+      .then((data) => {
+        if (!mounted || !data) return;
+
+        setNotifications(data.notifications);
+      });
+
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [setNotifications]);
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const query = searchQuery.trim();
+
+    if (!query) return;
+
+    router.push(`/customer/featured-combos?q=${encodeURIComponent(query)}`);
+  }
 
   return (
     <div className="p-6 pb-28">
@@ -128,14 +157,16 @@ const Dashboard = () => {
         <span className="text-[#A4A4A4]">right to your door</span>{" "}
       </h2>
 
-      <div className="flex items-center space-x-3 rounded-md border border-[#cccccc] p-3 w-full">
+      <form onSubmit={submitSearch} className="flex items-center space-x-3 rounded-md border border-[#cccccc] p-3 w-full">
         <SearchIcon />
         <input
           type="text"
           placeholder="Search for combos..."
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
           className="placeholder:text-[#A4A4A4] text-[14px] focus:outline-none"
         />
-      </div>
+      </form>
 
       <div className="mt-10">
         <img src="/ad.png" className="w-full" alt="promo-banner" />

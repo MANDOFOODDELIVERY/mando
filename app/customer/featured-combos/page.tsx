@@ -14,6 +14,8 @@ type ComboSummary = {
   name: string;
   priceAmount: number;
   imageUrl: string | null;
+  ratingAverage: number;
+  reviewCount: number;
   restaurant: {
     id: string;
     name: string;
@@ -28,11 +30,21 @@ function formatNaira(amount: number) {
 const FeaturedMealCombos = () => {
   const [combos, setCombos] = useState<ComboSummary[]>([]);
   const [filteredByServiceArea, setFilteredByServiceArea] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    setSearchQuery(new URLSearchParams(window.location.search).get("q") ?? "");
+  }, []);
 
   useEffect(() => {
     let mounted = true;
+    const timeout = window.setTimeout(() => {
+      const query = searchQuery.trim();
+      const url = new URL(`${API_BASE_URL}/customer/combos`);
 
-    fetch(`${API_BASE_URL}/customer/combos`, {
+      if (query) url.searchParams.set("q", query);
+
+    fetch(url.toString(), {
       credentials: "include",
     })
       .then(async (response) => {
@@ -54,11 +66,13 @@ const FeaturedMealCombos = () => {
 
         setCombos([]);
       });
+    }, 250);
 
     return () => {
       mounted = false;
+      window.clearTimeout(timeout);
     };
-  }, []);
+  }, [searchQuery]);
 
   const groupedCombos = useMemo(() => {
     const groups = new Map<string, { restaurant: ComboSummary["restaurant"]; combos: ComboSummary[] }>();
@@ -95,6 +109,8 @@ const FeaturedMealCombos = () => {
         <input
           type="text"
           placeholder="Search for combos..."
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
           className="placeholder:text-[#A4A4A4] text-[14px] focus:outline-none"
         />
       </div>
@@ -127,6 +143,7 @@ const FeaturedMealCombos = () => {
                   title={combo.name}
                   price={formatNaira(combo.priceAmount)}
                   vendor={group.restaurant.name}
+                  rating={`${combo.ratingAverage || "New"}${combo.reviewCount ? ` (${combo.reviewCount})` : ""}`}
                   imgUrl={combo.imageUrl ?? "/dummy-img.jpg"}
                   href={`/customer/featured-combos/${combo.id}`}
                 />

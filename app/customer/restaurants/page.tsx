@@ -21,6 +21,8 @@ type RestaurantSummary = {
   minimumOrderAmount: number;
   preparationMinMinutes: number | null;
   preparationMaxMinutes: number | null;
+  ratingAverage: number;
+  reviewCount: number;
   serviceArea: {
     name: string;
     city: string;
@@ -42,9 +44,21 @@ const SuggestedRestaurant = () => {
   const [nearbyRestaurants, setNearbyRestaurants] = useState<RestaurantSummary[]>([]);
   const [hasNearbyLocation, setHasNearbyLocation] = useState(false);
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     let mounted = true;
+    setRestaurantsLoading(true);
+    const timeout = window.setTimeout(() => {
+      const query = searchQuery.trim();
+      const nearbyUrl = new URL(`${API_BASE_URL}/customer/restaurants`);
+      const allUrl = new URL(`${API_BASE_URL}/customer/restaurants`);
+
+      nearbyUrl.searchParams.set("nearby", "true");
+      if (query) {
+        nearbyUrl.searchParams.set("q", query);
+        allUrl.searchParams.set("q", query);
+      }
 
     const readRestaurants = async (url: string) => {
       const response = await fetch(url, {
@@ -60,8 +74,8 @@ const SuggestedRestaurant = () => {
     };
 
     Promise.all([
-      readRestaurants(`${API_BASE_URL}/customer/restaurants?nearby=true`),
-      readRestaurants(`${API_BASE_URL}/customer/restaurants`),
+      readRestaurants(nearbyUrl.toString()),
+      readRestaurants(allUrl.toString()),
     ])
       .then(([nearbyData, allData]) => {
         if (!mounted) return;
@@ -81,11 +95,13 @@ const SuggestedRestaurant = () => {
 
         setRestaurantsLoading(false);
       });
+    }, 250);
 
     return () => {
       mounted = false;
+      window.clearTimeout(timeout);
     };
-  }, []);
+  }, [searchQuery]);
 
   return (
     <div className="p-6 pb-28">
@@ -106,6 +122,8 @@ const SuggestedRestaurant = () => {
         <input
           type="text"
           placeholder="Search for restaurants..."
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
           className="placeholder:text-[#A4A4A4] text-[14px] focus:outline-none w-full"
         />
       </div>
@@ -176,8 +194,8 @@ function RestaurantGrid({
           id={restaurant.slug}
           name={restaurant.name}
           description={restaurant.description ?? "Mando restaurant"}
-          rating="4.7"
-          reviews={124}
+          rating={restaurant.ratingAverage ? String(restaurant.ratingAverage) : "New"}
+          reviews={restaurant.reviewCount}
           timeRange={formatTimeRange(restaurant.preparationMinMinutes, restaurant.preparationMaxMinutes)}
           minOrder={formatNaira(restaurant.minimumOrderAmount)}
           area={`${restaurant.serviceArea.name}, ${restaurant.serviceArea.city}`}

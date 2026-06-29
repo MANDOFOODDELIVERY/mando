@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import ConfirmationModal from "@/components/ConfirmationModal";
 import { ArrowLeftIcon, DefaultUserIcon, GreyedStarIcon, StarIcon } from "@/components/svgs/DefaultIcons";
 import useAuthStore from "@/store/authStore";
 import { useToastStore } from "@/store/toastStore";
@@ -158,6 +159,7 @@ export default function ProfilePage() {
   const [savingBirthday, setSavingBirthday] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [orders, setOrders] = useState<CustomerOrderSummary[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
@@ -828,13 +830,27 @@ export default function ProfilePage() {
         </section>
 
         <div className="mb-20">
-          <button disabled={loggingOut} onClick={logout} className="w-full rounded-2xl bg-[#E53E3E] py-4 text-sm font-semibold text-white shadow-sm disabled:opacity-60">
+          <button disabled={loggingOut} onClick={() => setShowLogoutConfirmation(true)} className="w-full rounded-2xl bg-[#E53E3E] py-4 text-sm font-semibold text-white shadow-sm disabled:opacity-60">
             {loggingOut ? "Logging out..." : "Logout"}
           </button>
         </div>
       </div>
 
       <BottomNav />
+
+      <ConfirmationModal
+        open={showLogoutConfirmation}
+        title="Log out?"
+        description="You will need to log in again before viewing your profile or placing an order."
+        confirmLabel="Logout"
+        confirming={loggingOut}
+        danger
+        onClose={() => setShowLogoutConfirmation(false)}
+        onConfirm={() => {
+          setShowLogoutConfirmation(false);
+          void logout();
+        }}
+      />
     </motion.div>
   );
 }

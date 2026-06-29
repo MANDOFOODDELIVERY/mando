@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { and, asc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 
 import { getCurrentSessionContext } from '../auth/current-session.js'
 import { database } from '../db/client.js'
@@ -8,6 +8,7 @@ import {
   comboItems,
   combos,
   menuItems,
+  orderReviews,
   restaurants,
   serviceAreas,
 } from '../db/schema.js'
@@ -18,12 +19,13 @@ type ComboSummary = Awaited<ReturnType<typeof getComboRows>>[number]
 export async function catalogRoutes(app: FastifyInstance) {
   app.get('/restaurants', async (request, reply) => {
     const nearbyRequested = isNearbyCatalogRequest(request.query)
+    const searchQuery = getCatalogSearchQuery(request.query)
     const serviceAreaId = nearbyRequested
       ? await getCustomerServiceAreaId(request.headers.cookie)
       : null
     const restaurantRows = nearbyRequested && !serviceAreaId
       ? []
-      : await getRestaurantRows(serviceAreaId)
+      : await getRestaurantRows(serviceAreaId, undefined, searchQuery)
     const restaurantIds = restaurantRows.map((restaurant) => restaurant.id)
     const comboRows = restaurantIds.length > 0
       ? await getCombosForRestaurants(restaurantIds)
@@ -63,12 +65,13 @@ export async function catalogRoutes(app: FastifyInstance) {
 
   app.get('/combos', async (request, reply) => {
     const nearbyRequested = isNearbyCatalogRequest(request.query)
+    const searchQuery = getCatalogSearchQuery(request.query)
     const serviceAreaId = nearbyRequested
       ? await getCustomerServiceAreaId(request.headers.cookie)
       : null
     const comboRows = nearbyRequested && !serviceAreaId
       ? []
-      : await getComboRows(serviceAreaId)
+      : await getComboRows(serviceAreaId, undefined, searchQuery)
 
     return reply.status(200).send({
       combos: comboRows.map(serializeComboSummary),
@@ -120,6 +123,14 @@ function isNearbyCatalogRequest(query: unknown) {
   return nearby === true || nearby === 'true' || nearby === '1' || nearby === 1
 }
 
+function getCatalogSearchQuery(query: unknown) {
+  const rawQuery = (query as { q?: string } | undefined)?.q?.trim()
+
+  if (!rawQuery) return undefined
+
+  return rawQuery.slice(0, 80)
+}
+
 async function getCustomerServiceAreaId(cookieHeader: string | undefined) {
   const sessionContext = await getCurrentSessionContext(cookieHeader)
 
@@ -141,7 +152,11 @@ async function getCustomerServiceAreaId(cookieHeader: string | undefined) {
   return defaultAddress?.serviceAreaId ?? null
 }
 
-function getRestaurantRows(serviceAreaId?: string | null, restaurantId?: string) {
+function getRestaurantRows(
+  serviceAreaId?: string | null,
+  restaurantId?: string,
+  searchQuery?: string,
+) {
   const conditions = [
     eq(restaurants.status, 'active' as const),
   ]
@@ -153,6 +168,18 @@ function getRestaurantRows(serviceAreaId?: string | null, restaurantId?: string)
   if (restaurantId) {
     conditions.push(
       sql`(${restaurants.id}::text = ${restaurantId} or ${restaurants.slug} = ${restaurantId})`,
+    )
+  }
+
+  if (searchQuery) {
+    const pattern = `%${searchQuery}%`
+
+    conditions.push(
+      or(
+        ilike(restaurants.name, pattern),
+        ilike(restaurants.description, pattern),
+        ilike(serviceAreas.name, pattern),
+      )!,
     )
   }
 
@@ -169,6 +196,8 @@ function getRestaurantRows(serviceAreaId?: string | null, restaurantId?: string)
       preparationMaxMinutes: restaurants.preparationMaxMinutes,
       imageUrl: restaurants.imageUrl,
       isVerified: restaurants.isVerified,
+      ratingAverage: sql<number>`coalesce(round(avg(${orderReviews.rating})::numeric, 1), 0)`,
+      reviewCount: sql<number>`count(${orderReviews.id})::int`,
       serviceArea: {
         id: serviceAreas.id,
         name: serviceAreas.name,
@@ -178,7 +207,9 @@ function getRestaurantRows(serviceAreaId?: string | null, restaurantId?: string)
     })
     .from(restaurants)
     .innerJoin(serviceAreas, eq(restaurants.serviceAreaId, serviceAreas.id))
+    .leftJoin(orderReviews, eq(orderReviews.restaurantId, restaurants.id))
     .where(and(...conditions))
+    .groupBy(restaurants.id, serviceAreas.id)
     .orderBy(asc(restaurants.name))
 }
 
@@ -195,19 +226,27 @@ function getCombosForRestaurants(restaurantIds: string[]) {
       restaurantId: combos.restaurantId,
       restaurantName: restaurants.name,
       restaurantSlug: restaurants.slug,
+      ratingAverage: sql<number>`coalesce(round(avg(${orderReviews.rating})::numeric, 1), 0)`,
+      reviewCount: sql<number>`count(${orderReviews.id})::int`,
     })
     .from(combos)
     .innerJoin(restaurants, eq(combos.restaurantId, restaurants.id))
+    .leftJoin(orderReviews, eq(orderReviews.restaurantId, restaurants.id))
     .where(
       and(
         eq(combos.isAvailable, true),
         inArray(combos.restaurantId, restaurantIds),
       ),
     )
+    .groupBy(combos.id, restaurants.id)
     .orderBy(asc(combos.name))
 }
 
-function getComboRows(serviceAreaId?: string | null, comboId?: string) {
+function getComboRows(
+  serviceAreaId?: string | null,
+  comboId?: string,
+  searchQuery?: string,
+) {
   const conditions = [
     eq(combos.isAvailable, true),
     eq(restaurants.status, 'active' as const),
@@ -223,6 +262,18 @@ function getComboRows(serviceAreaId?: string | null, comboId?: string) {
     )
   }
 
+  if (searchQuery) {
+    const pattern = `%${searchQuery}%`
+
+    conditions.push(
+      or(
+        ilike(combos.name, pattern),
+        ilike(combos.description, pattern),
+        ilike(restaurants.name, pattern),
+      )!,
+    )
+  }
+
   return database
     .select({
       id: combos.id,
@@ -235,10 +286,14 @@ function getComboRows(serviceAreaId?: string | null, comboId?: string) {
       restaurantId: restaurants.id,
       restaurantName: restaurants.name,
       restaurantSlug: restaurants.slug,
+      ratingAverage: sql<number>`coalesce(round(avg(${orderReviews.rating})::numeric, 1), 0)`,
+      reviewCount: sql<number>`count(${orderReviews.id})::int`,
     })
     .from(combos)
     .innerJoin(restaurants, eq(combos.restaurantId, restaurants.id))
+    .leftJoin(orderReviews, eq(orderReviews.restaurantId, restaurants.id))
     .where(and(...conditions))
+    .groupBy(combos.id, restaurants.id)
     .orderBy(asc(restaurants.name), asc(combos.name))
 }
 
@@ -268,6 +323,8 @@ function serializeRestaurantSummary(
     preparationMinMinutes: restaurant.preparationMinMinutes,
     preparationMaxMinutes: restaurant.preparationMaxMinutes,
     comboCount: restaurantCombos.length,
+    ratingAverage: Number(restaurant.ratingAverage),
+    reviewCount: Number(restaurant.reviewCount),
     serviceArea: restaurant.serviceArea,
   }
 }
@@ -283,6 +340,8 @@ function serializeComboSummary(
     priceAmount: combo.priceAmount,
     imageUrl: combo.imageUrl,
     isFeatured: combo.isFeatured,
+    ratingAverage: Number(combo.ratingAverage),
+    reviewCount: Number(combo.reviewCount),
     restaurant: {
       id: combo.restaurantId,
       name: combo.restaurantName,

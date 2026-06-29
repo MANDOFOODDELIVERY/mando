@@ -9,22 +9,29 @@ export default function PaymentSuccessPage() {
   const deliveryAddress = useCartStore((s) => s.deliveryAddress);
   const items = useCartStore((s) => s.items);
   const checkoutOrder = useCartStore((s) => s.checkoutOrder);
+  const clearCart = useCartStore((s) => s.clear);
   const [queryOrderId, setQueryOrderId] = useState<string | null>(null);
   const [queryOrderNumber, setQueryOrderNumber] = useState<string | null>(null);
+  const [snapshot] = useState(() => ({
+    deliveryAddress,
+    restaurantName: items.length > 0 ? items[0].restaurantName || "Restaurant" : "Restaurant",
+    orderNumber: checkoutOrder?.orderNumber,
+  }));
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
 
     setQueryOrderId(query.get("orderId"));
     setQueryOrderNumber(query.get("orderNumber"));
+    clearCart();
   }, []);
 
   const orderId =
     queryOrderNumber ??
-    checkoutOrder?.orderNumber ??
+    snapshot.orderNumber ??
     queryOrderId ??
     "Pending";
-  const restaurantName = items.length > 0 ? items[0].restaurantName || "Restaurant" : "Restaurant";
+  const restaurantName = snapshot.restaurantName;
   const customerName = "You";
   const riderName = "Assigning rider";
   const riderPhone = "Pending";
@@ -68,7 +75,7 @@ export default function PaymentSuccessPage() {
 
           <div>
             <p className="text-sm text-[#A4A4A4]">Delivery address</p>
-            <p className="font-semibold mt-2">{deliveryAddress}</p>
+            <p className="font-semibold mt-2">{snapshot.deliveryAddress}</p>
           </div>
 
           <div className="rounded-xl bg-white p-4 border border-gray-200 space-y-3">
