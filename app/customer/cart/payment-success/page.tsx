@@ -1,23 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import { CashBundleIcon } from "@/components/svgs/DefaultIcons";
 import useCartStore from "@/store/cartStore";
-
-function makeOrderId() {
-  return Math.random().toString(36).slice(2, 8).toUpperCase();
-}
 
 export default function PaymentSuccessPage() {
   const deliveryAddress = useCartStore((s) => s.deliveryAddress);
   const items = useCartStore((s) => s.items);
+  const checkoutOrder = useCartStore((s) => s.checkoutOrder);
+  const [queryOrderId, setQueryOrderId] = useState<string | null>(null);
+  const [queryOrderNumber, setQueryOrderNumber] = useState<string | null>(null);
 
-  const orderId = useMemo(() => makeOrderId(), []);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+
+    setQueryOrderId(query.get("orderId"));
+    setQueryOrderNumber(query.get("orderNumber"));
+  }, []);
+
+  const orderId =
+    queryOrderNumber ??
+    checkoutOrder?.orderNumber ??
+    queryOrderId ??
+    "Pending";
   const restaurantName = items.length > 0 ? items[0].restaurantName || "Restaurant" : "Restaurant";
   const customerName = "You";
-  const riderName = "Rider Tunde";
-  const riderPhone = "+234 801 234 5678";
+  const riderName = "Assigning rider";
+  const riderPhone = "Pending";
   const eta = "30-45 mins";
 
   return (
@@ -35,7 +45,9 @@ export default function PaymentSuccessPage() {
 
         <div>
           <h1 className="text-[24px] font-semibold">Your order is placed</h1>
-          <p className="text-[#6B6B6B] mt-3">Congratulations! Your order is on its way and will be delivered as soon as possible.</p>
+          <p className="text-[#6B6B6B] mt-3">
+            We&apos;ve recorded your order and will confirm payment before sending it to the restaurant.
+          </p>
         </div>
 
 

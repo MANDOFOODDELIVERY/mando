@@ -23,13 +23,29 @@ type SavedAddress = {
   };
 };
 
+type ComboSummary = {
+  id: string;
+  name: string;
+  priceAmount: number;
+  imageUrl: string | null;
+  restaurant: {
+    name: string;
+  };
+};
+
 function formatAddress(address: SavedAddress) {
   return `${address.streetAddress}, ${address.serviceArea.name}`;
+}
+
+function formatNaira(amount: number) {
+  return `₦${amount.toLocaleString()}`;
 }
 
 const Dashboard = () => {
   const unreadCount = useNotificationStore((s) => s.unreadCount());
   const [deliveryAddress, setDeliveryAddress] = useState("Add delivery address");
+  const [combos, setCombos] = useState<ComboSummary[]>([]);
+  const [combosLoading, setCombosLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
@@ -52,6 +68,30 @@ const Dashboard = () => {
         }
       });
 
+    fetch(`${API_BASE_URL}/customer/combos`, {
+      credentials: "include",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Unable to load combos");
+
+        return response.json() as Promise<{ combos: ComboSummary[] }>;
+      })
+      .then((data) => {
+        if (!mounted) return;
+
+        setCombos(data.combos.slice(0, 6));
+      })
+      .catch(() => {
+        if (!mounted) return;
+
+        setCombos([]);
+      })
+      .finally(() => {
+        if (!mounted) return;
+
+        setCombosLoading(false);
+      });
+
     return () => {
       mounted = false;
     };
@@ -59,7 +99,6 @@ const Dashboard = () => {
 
   return (
     <div className="p-6 pb-28">
-      {/* Header */}
       <div className="flex justify-between items-center ">
         <Link href="/customer/address" className="flex items-center space-x-3">
           <div className="w-[43px] h-[47px] flex items-center justify-center bg-[#F7F7F7] rounded-md">
@@ -89,7 +128,6 @@ const Dashboard = () => {
         <span className="text-[#A4A4A4]">right to your door</span>{" "}
       </h2>
 
-      {/* search bar */}
       <div className="flex items-center space-x-3 rounded-md border border-[#cccccc] p-3 w-full">
         <SearchIcon />
         <input
@@ -111,27 +149,26 @@ const Dashboard = () => {
           </Link>
         </div>
         <div className="grid grid-cols-2 gap-6 mt-6">
-          {[
-            {
-              id: 1,
-              title: "Amala + Ewedu soup",
-              price: "N2,800",
-              vendor: "Mama Chef Cafe",
-            },
-            { id: 2, title: "Jollof + Chicken", price: "N3,200", vendor: "Spice Hub" },
-            { id: 3, title: "Rice + Stew", price: "N2,500", vendor: "MealStop" },
-            { id: 4, title: "Pounded Yam + Egusi", price: "N4,000", vendor: "Grandma's" },
-            { id: 5, title: "Yam + Egg Sauce", price: "N1,800", vendor: "QuickBite" },
-            { id: 6, title: "Beans + Plantain", price: "N2,200", vendor: "Street Eats" },
-          ].map((combo) => (
-            <ComboCard
-              key={combo.id}
-              title={combo.title}
-              price={combo.price}
-              vendor={combo.vendor}
-              href={`/customer/featured-combos/${combo.id}`}
-            />
-          ))}
+          {combosLoading ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <ComboSkeleton key={`combo-skeleton-${index}`} />
+            ))
+          ) : combos.length > 0 ? (
+            combos.map((combo) => (
+              <ComboCard
+                key={combo.id}
+                title={combo.name}
+                price={formatNaira(combo.priceAmount)}
+                vendor={combo.restaurant.name}
+                imgUrl={combo.imageUrl ?? "/dummy-img.jpg"}
+                href={`/customer/featured-combos/${combo.id}`}
+              />
+            ))
+          ) : (
+            <p className="col-span-2 rounded-md bg-[#F7F7F7] p-5 text-center text-sm text-[#A4A4A4]">
+              No combos are available right now.
+            </p>
+          )}
         </div>
       </div>
 
@@ -139,5 +176,18 @@ const Dashboard = () => {
     </div>
   );
 };
+
+function ComboSkeleton() {
+  return (
+    <div className="animate-pulse overflow-hidden rounded-md border border-[#EFEFEF] bg-white">
+      <div className="aspect-square bg-[#EFEFEF]" />
+      <div className="space-y-3 p-3">
+        <div className="h-4 w-4/5 rounded bg-[#EFEFEF]" />
+        <div className="h-3 w-3/5 rounded bg-[#EFEFEF]" />
+        <div className="h-4 w-1/2 rounded bg-[#EFEFEF]" />
+      </div>
+    </div>
+  );
+}
 
 export default Dashboard;

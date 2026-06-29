@@ -7,15 +7,34 @@ export type CartItem = {
   comboName: string;
   quantity: number;
   price: number; // unit price
+  components?: CartItemComponent[];
+};
+
+export type CartItemComponent = {
+  menuItemId: string;
+  name: string;
+  quantity: number;
+  baseQuantity: number;
+  unitPrice: number;
+};
+
+export type CheckoutOrder = {
+  id: string;
+  orderNumber: string;
+  status: string;
+  totalAmount: number;
+  currency: string;
 };
 
 type CartState = {
   items: CartItem[];
+  checkoutOrder: CheckoutOrder | null;
   deliveryAddress: string;
   phoneNumber: string;
   addItem: (item: CartItem) => void;
   removeItem: (id: string) => void;
   updateQuantity: (id: string, quantity: number) => void;
+  setCheckoutOrder: (order: CheckoutOrder | null) => void;
   clear: () => void;
   setDeliveryAddress: (address: string) => void;
   setPhoneNumber: (phone: string) => void;
@@ -24,6 +43,7 @@ type CartState = {
 
 export const useCartStore = create<CartState>((set, get) => ({
   items: [],
+  checkoutOrder: null,
   deliveryAddress: "Add delivery address",
   phoneNumber: "",
   addItem: (item) =>
@@ -32,7 +52,13 @@ export const useCartStore = create<CartState>((set, get) => ({
       if (exists) {
         return {
           items: state.items.map((i) =>
-            i.id === item.id ? { ...i, quantity: i.quantity + item.quantity } : i,
+            i.id === item.id
+              ? {
+                  ...i,
+                  ...item,
+                  quantity: item.quantity || i.quantity,
+                }
+              : i,
           ),
         };
       }
@@ -41,7 +67,8 @@ export const useCartStore = create<CartState>((set, get) => ({
   removeItem: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
   updateQuantity: (id, quantity) =>
     set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, quantity } : i)) })),
-  clear: () => set({ items: [] }),
+  setCheckoutOrder: (order) => set({ checkoutOrder: order }),
+  clear: () => set({ items: [], checkoutOrder: null }),
   setDeliveryAddress: (address) => set({ deliveryAddress: address }),
   setPhoneNumber: (phone) => set({ phoneNumber: phone }),
   total: () => get().items.reduce((sum, i) => sum + i.price * i.quantity, 0),

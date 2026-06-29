@@ -1,11 +1,25 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { getCurrentSessionContext } from '../auth/current-session.js'
 import { serializeClearSessionCookie } from '../auth/index.js'
 import { database } from '../db/client.js'
-import { addresses, profiles, serviceAreas } from '../db/schema.js'
+import {
+  addresses,
+  comboItems,
+  combos,
+  deliveries,
+  menuItems,
+  orderItemComponents,
+  orderItems,
+  orders,
+  orderStatusEvents,
+  payments,
+  profiles,
+  restaurants,
+  serviceAreas,
+} from '../db/schema.js'
 
 const updateProfileBodySchema = z
   .object({
@@ -43,6 +57,31 @@ const updateAddressBodySchema = addressBodySchema.partial().refine(
     message: 'Provide at least one address field to update.',
   },
 )
+
+const createOrderBodySchema = z.object({
+  addressId: z.uuid().optional(),
+  paymentMethod: z
+    .enum(['bank_transfer', 'card', 'bank', 'ussd', 'wallet'])
+    .default('card'),
+  customerNote: z.string().trim().max(500).nullable().optional(),
+  items: z
+    .array(
+      z.object({
+        comboId: z.uuid(),
+        quantity: z.number().int().min(1).max(20),
+        components: z
+          .array(
+            z.object({
+              menuItemId: z.uuid(),
+              quantity: z.number().int().min(0).max(50),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .min(1)
+    .max(25),
+})
 
 const MAX_CUSTOMER_ADDRESSES = 3
 
@@ -414,6 +453,223 @@ export async function customerRoutes(app: FastifyInstance) {
 
     return reply.status(204).send()
   })
+
+  app.post('/orders', async (request, reply) => {
+    const sessionContext = await getCurrentSessionContext(request.headers.cookie)
+
+    if (!sessionContext) {
+      return sendUnauthenticated(reply)
+    }
+
+    const parsedBody = createOrderBodySchema.safeParse(request.body)
+
+    if (!parsedBody.success) {
+      return sendValidationError(reply, 'Please check your order details and try again.', parsedBody.error.issues)
+    }
+
+    const profile = sessionContext.authPayload.profile
+
+    if (!profile?.phone) {
+      return reply.status(409).send({
+        error: 'missing_phone_number',
+        message: 'Please add your phone number before placing an order.',
+      })
+    }
+
+    const deliveryRecipientName = profile.fullName
+    const deliveryPhone = profile.phone
+
+    const body = parsedBody.data
+    const deliveryAddress = body.addressId
+      ? await getUserAddressDetails(sessionContext.userId, body.addressId)
+      : await getDefaultUserAddressDetails(sessionContext.userId)
+
+    if (!deliveryAddress) {
+      return reply.status(409).send({
+        error: 'missing_delivery_address',
+        message: 'Please add a delivery address before placing an order.',
+      })
+    }
+
+    const requestedComboIds = Array.from(
+      new Set(body.items.map((item) => item.comboId)),
+    )
+    const comboRows = await getAvailableCombos(requestedComboIds)
+
+    if (comboRows.length !== requestedComboIds.length) {
+      return reply.status(400).send({
+        error: 'invalid_order_item',
+        message: 'One or more combos are unavailable. Please refresh your cart.',
+      })
+    }
+
+    const restaurantIds = new Set(comboRows.map((combo) => combo.restaurantId))
+
+    if (restaurantIds.size > 1) {
+      return reply.status(400).send({
+        error: 'multiple_restaurants_not_supported',
+        message: 'Please place orders from one restaurant at a time.',
+      })
+    }
+
+    const restaurantId = Array.from(restaurantIds)[0]
+
+    if (!restaurantId) {
+      return reply.status(400).send({
+        error: 'invalid_order_item',
+        message: 'One or more combos are unavailable. Please refresh your cart.',
+      })
+    }
+    const comboById = new Map(comboRows.map((combo) => [combo.id, combo]))
+    const componentRows = await getComboComponents(requestedComboIds)
+    const componentsByComboId = groupComponentsByComboId(componentRows)
+    const componentOverrideError = validateComponentOverrides(
+      body.items,
+      componentsByComboId,
+    )
+
+    if (componentOverrideError) {
+      return reply.status(400).send(componentOverrideError)
+    }
+
+    const normalizedItems = body.items.map((item) => {
+      const combo = comboById.get(item.comboId)
+
+      if (!combo) {
+        throw new Error('Combo lookup failed after availability validation.')
+      }
+
+      const baseComponents = componentsByComboId.get(combo.id) ?? []
+      const componentOverrides = new Map(
+        item.components?.map((component) => [
+          component.menuItemId,
+          component.quantity,
+        ]) ?? [],
+      )
+      const components = baseComponents
+        .map((component) => {
+          const quantity = componentOverrides.get(component.menuItemId)
+            ?? component.quantity
+
+          return {
+            ...component,
+            quantity,
+            lineTotalAmount: component.priceAmount * quantity * item.quantity,
+          }
+        })
+        .filter((component) => component.quantity > 0)
+      const unitPriceAmount = item.components
+        ? components.reduce(
+            (total, component) =>
+              total + component.priceAmount * component.quantity,
+            0,
+          )
+        : combo.priceAmount
+
+      return {
+        combo,
+        quantity: item.quantity,
+        unitPriceAmount,
+        lineTotalAmount: unitPriceAmount * item.quantity,
+        components,
+      }
+    })
+
+    const subtotalAmount = normalizedItems.reduce(
+      (total, item) => total + item.lineTotalAmount,
+      0,
+    )
+    const deliveryFeeAmount = 0
+    const discountAmount = 0
+    const totalAmount = subtotalAmount + deliveryFeeAmount - discountAmount
+
+    const createdOrder = await database.transaction(async (tx) => {
+      const [order] = await tx
+        .insert(orders)
+        .values({
+          orderNumber: generateOrderNumber(),
+          customerId: sessionContext.userId,
+          restaurantId,
+          addressId: deliveryAddress.id,
+          deliveryRecipientName,
+          deliveryPhone,
+          deliveryStreetAddress: deliveryAddress.streetAddress,
+          deliveryServiceArea: deliveryAddress.serviceArea.name,
+          ...(deliveryAddress.landmark
+            ? { deliveryLandmark: deliveryAddress.landmark }
+            : {}),
+          status: 'pending_payment',
+          subtotalAmount,
+          deliveryFeeAmount,
+          discountAmount,
+          totalAmount,
+          ...(body.customerNote ? { customerNote: body.customerNote } : {}),
+          placedAt: new Date(),
+        })
+        .returning({
+          id: orders.id,
+          orderNumber: orders.orderNumber,
+          status: orders.status,
+          totalAmount: orders.totalAmount,
+          currency: orders.currency,
+          createdAt: orders.createdAt,
+        })
+
+      for (const item of normalizedItems) {
+        const [orderItem] = await tx
+          .insert(orderItems)
+          .values({
+            orderId: order.id,
+            comboId: item.combo.id,
+            itemName: item.combo.name,
+            unitPriceAmount: item.unitPriceAmount,
+            quantity: item.quantity,
+            lineTotalAmount: item.lineTotalAmount,
+          })
+          .returning({ id: orderItems.id })
+
+        if (item.components.length > 0) {
+          await tx.insert(orderItemComponents).values(
+            item.components.map((component) => ({
+              orderItemId: orderItem.id,
+              menuItemId: component.menuItemId,
+              itemName: component.name,
+              unitPriceAmount: component.priceAmount,
+              quantity: component.quantity * item.quantity,
+              lineTotalAmount: component.lineTotalAmount,
+            })),
+          )
+        }
+      }
+
+      await tx.insert(payments).values({
+        orderId: order.id,
+        method: body.paymentMethod,
+        provider: body.paymentMethod === 'card' ? 'routepay' : null,
+        amount: totalAmount,
+        status: 'pending',
+      })
+
+      await tx.insert(deliveries).values({
+        orderId: order.id,
+        serviceAreaId: deliveryAddress.serviceArea.id,
+        deliveryFeeAmount,
+      })
+
+      await tx.insert(orderStatusEvents).values({
+        orderId: order.id,
+        status: 'pending_payment',
+        actorUserId: sessionContext.userId,
+        note: 'Order created and awaiting payment.',
+      })
+
+      return order
+    })
+
+    return reply.status(201).send({
+      order: createdOrder,
+    })
+  })
 }
 
 const addressReturnColumns = {
@@ -444,6 +700,137 @@ function selectUserAddresses(userId: string) {
     .innerJoin(serviceAreas, eq(addresses.serviceAreaId, serviceAreas.id))
     .where(eq(addresses.userId, userId))
     .orderBy(desc(addresses.isDefault), asc(addresses.createdAt))
+}
+
+async function getUserAddressDetails(userId: string, addressId: string) {
+  const [address] = await selectUserAddressDetails(userId, addressId)
+
+  return address
+}
+
+async function getDefaultUserAddressDetails(userId: string) {
+  const [address] = await selectUserAddressDetails(userId)
+
+  return address
+}
+
+function selectUserAddressDetails(userId: string, addressId?: string) {
+  const conditions = [eq(addresses.userId, userId)]
+
+  if (addressId) {
+    conditions.push(eq(addresses.id, addressId))
+  }
+
+  return database
+    .select({
+      id: addresses.id,
+      streetAddress: addresses.streetAddress,
+      landmark: addresses.landmark,
+      isDefault: addresses.isDefault,
+      serviceArea: {
+        id: serviceAreas.id,
+        name: serviceAreas.name,
+        city: serviceAreas.city,
+        state: serviceAreas.state,
+      },
+    })
+    .from(addresses)
+    .innerJoin(serviceAreas, eq(addresses.serviceAreaId, serviceAreas.id))
+    .where(and(...conditions))
+    .orderBy(desc(addresses.isDefault), asc(addresses.createdAt))
+    .limit(1)
+}
+
+function getAvailableCombos(comboIds: string[]) {
+  return database
+    .select({
+      id: combos.id,
+      name: combos.name,
+      restaurantId: combos.restaurantId,
+      priceAmount: combos.priceAmount,
+    })
+    .from(combos)
+    .innerJoin(restaurants, eq(combos.restaurantId, restaurants.id))
+    .where(
+      and(
+        inArray(combos.id, comboIds),
+        eq(combos.isAvailable, true),
+        eq(restaurants.status, 'active' as const),
+      ),
+    )
+}
+
+function getComboComponents(comboIds: string[]) {
+  return database
+    .select({
+      comboId: comboItems.comboId,
+      menuItemId: menuItems.id,
+      name: menuItems.name,
+      priceAmount: menuItems.priceAmount,
+      quantity: comboItems.quantity,
+    })
+    .from(comboItems)
+    .innerJoin(menuItems, eq(comboItems.menuItemId, menuItems.id))
+    .where(inArray(comboItems.comboId, comboIds))
+}
+
+type ComboComponent = Awaited<ReturnType<typeof getComboComponents>>[number]
+
+function groupComponentsByComboId(components: ComboComponent[]) {
+  const grouped = new Map<string, ComboComponent[]>()
+
+  for (const component of components) {
+    const existingComponents = grouped.get(component.comboId) ?? []
+
+    existingComponents.push(component)
+    grouped.set(component.comboId, existingComponents)
+  }
+
+  return grouped
+}
+
+function validateComponentOverrides(
+  items: z.infer<typeof createOrderBodySchema>['items'],
+  componentsByComboId: Map<string, ComboComponent[]>,
+) {
+  for (const item of items) {
+    if (!item.components) continue
+
+    const baseComponents = componentsByComboId.get(item.comboId) ?? []
+    const baseComponentByMenuItemId = new Map(
+      baseComponents.map((component) => [component.menuItemId, component]),
+    )
+
+    for (const component of item.components) {
+      const baseComponent = baseComponentByMenuItemId.get(component.menuItemId)
+
+      if (!baseComponent) {
+        return {
+          error: 'invalid_combo_component',
+          message: 'One or more combo items are not valid for this combo.',
+        }
+      }
+
+      if (component.quantity < baseComponent.quantity) {
+        return {
+          error: 'invalid_combo_component_quantity',
+          message: 'Combo item quantities cannot be lower than the base combo.',
+        }
+      }
+    }
+  }
+
+  return null
+}
+
+function generateOrderNumber() {
+  const datePart = new Date()
+    .toISOString()
+    .slice(0, 10)
+    .replaceAll('-', '')
+  const randomPart = Math.random().toString(36).slice(2, 8).toUpperCase()
+
+  return `MND-${datePart}-${randomPart}`
 }
 
 async function getUserAddress(userId: string, addressId: string) {

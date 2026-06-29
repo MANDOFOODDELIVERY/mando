@@ -22,14 +22,27 @@ type SavedAddress = {
   isDefault: boolean;
 };
 
+type CreateOrderResponse = {
+  order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    totalAmount: number;
+    currency: string;
+  };
+};
+
 export default function PaymentPage() {
   const router = useRouter();
   const auth = useAuthStore((s) => s.auth);
   const authLoading = useAuthStore((s) => s.loading);
   const fetchCurrentUser = useAuthStore((s) => s.fetchCurrentUser);
   const items = useCartStore((s) => s.items);
+  const setCheckoutOrder = useCartStore((s) => s.setCheckoutOrder);
   const showToast = useToastStore((s) => s.showToast);
   const [checkingRequirements, setCheckingRequirements] = useState(true);
+  const [creatingOrder, setCreatingOrder] = useState(false);
+  const [createdOrder, setCreatedOrder] = useState<CreateOrderResponse["order"] | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -101,6 +114,62 @@ export default function PaymentPage() {
     }
   };
 
+  async function createOrder() {
+    if (createdOrder) return createdOrder;
+
+    setCreatingOrder(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customer/orders`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          paymentMethod: "bank_transfer",
+          items: items.map((item) => ({
+            comboId: item.id,
+            quantity: item.quantity,
+            components: item.components?.map((component) => ({
+              menuItemId: component.menuItemId,
+              quantity: component.quantity,
+            })),
+          })),
+        }),
+      });
+
+      const data = (await response.json()) as
+        | CreateOrderResponse
+        | { message?: string };
+
+      if (!response.ok || !("order" in data)) {
+        const message = "message" in data ? data.message : undefined;
+
+        throw new Error(message ?? "Unable to create order");
+      }
+
+      setCreatedOrder(data.order);
+      setCheckoutOrder(data.order);
+      showToast(`Order ${data.order.orderNumber} created`, "success");
+
+      return data.order;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to create order", "error");
+      return null;
+    } finally {
+      setCreatingOrder(false);
+    }
+  }
+
+  async function confirmPayment() {
+    const order = await createOrder();
+
+    if (!order) return;
+
+    router.push(`/customer/cart/payment-processing?orderId=${order.id}`);
+  }
+
   if (!auth || checkingRequirements) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#F8F8F8] p-6">
@@ -152,10 +221,11 @@ export default function PaymentPage() {
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
         <button
           type="button"
-          onClick={() => router.push("/customer/cart/payment-processing")}
-          className="w-full rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-black"
+          disabled={creatingOrder}
+          onClick={confirmPayment}
+          className="w-full rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
         >
-          I&apos;ve made the payment
+          {creatingOrder ? "Creating order..." : "I've made the payment"}
         </button>
       </div>
     </div>

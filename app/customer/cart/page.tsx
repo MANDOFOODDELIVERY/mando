@@ -207,8 +207,23 @@ const CartPage = () => {
               <div>
                 <p className="text-[14px] font-semibold">{item.restaurantName}</p>
                 <p className="text-[13px] text-[#4D4D4D] my-1">{item.comboName}</p>
+                {item.components && item.components.length > 0 && (
+                  <div className="mb-2 space-y-0.5">
+                    {item.components.map((component) => (
+                      <p
+                        key={component.menuItemId}
+                        className="text-[12px] text-[#7A7A7A]"
+                      >
+                        {component.name} x{component.quantity}
+                        {component.quantity > component.baseQuantity
+                          ? ` (+${component.quantity - component.baseQuantity})`
+                          : ""}
+                      </p>
+                    ))}
+                  </div>
+                )}
                 <Link href={`/customer/featured-combos/${item.id}`} className="underline text-[13px] text-[#DFB400]">
-                  edit combo quantity
+                  edit combo portions
                 </Link>
               </div>
             </div>

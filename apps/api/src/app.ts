@@ -2,6 +2,7 @@ import cors from '@fastify/cors'
 import Fastify from 'fastify'
 
 import { authRoutes } from './routes/auth.js'
+import { catalogRoutes } from './routes/catalog.js'
 import { customerRoutes } from './routes/customer.js'
 import { uploadRoutes } from './routes/uploads.js'
 
@@ -39,6 +40,7 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   app.register(authRoutes, { prefix: '/auth' })
   app.register(customerRoutes, { prefix: '/customer' })
+  app.register(catalogRoutes, { prefix: '/customer' })
   app.register(uploadRoutes, { prefix: '/uploads' })
 
   app.get('/health', async () => {
