@@ -227,7 +227,7 @@ export default function AddressPage() {
         <button onClick={clear} className="flex-1 py-3 rounded-md border border-gray-300 text-gray-600">
           Clear
         </button>
-        <button disabled={saving} onClick={save} className="flex-1 py-3 rounded-md bg-[#DFB400] text-black font-semibold disabled:opacity-60">
+        <button disabled={saving} onClick={save} className="flex-1 py-3 rounded-md bg-[#DFB400] text-white font-semibold disabled:opacity-60">
           {saving ? "Saving..." : "Save address"}
         </button>
       </div>

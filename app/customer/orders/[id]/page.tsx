@@ -426,7 +426,7 @@ export default function OrderDetailPage({
                     onClick={() => setSelectedRating(rating)}
                     className={`h-11 w-11 rounded-full text-sm font-semibold ${
                       selectedRating >= rating
-                        ? "bg-[#DFB400] text-black"
+                        ? "bg-[#DFB400] text-white"
                         : "bg-[#F3F3F3] text-[#A4A4A4]"
                     }`}
                   >

@@ -12,6 +12,8 @@ import BottomNav from "@/components/BottomNav";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+const SKIP_ROUTEPAY_REDIRECT =
+  process.env.NEXT_PUBLIC_SKIP_ROUTEPAY_REDIRECT === "true";
 
 type SavedAddress = {
   id: string;
@@ -201,6 +203,12 @@ const CartPage = () => {
       }
 
       setCheckoutOrder(orderData.order);
+
+      if (SKIP_ROUTEPAY_REDIRECT) {
+        showToast(`Order ${orderData.order.orderNumber} created for testing`, "success");
+        router.push("/customer/cart/payment-success");
+        return;
+      }
 
       const routePayResponse = await fetch(`${API_BASE_URL}/customer/payments/routepay/initiate`, {
         method: "POST",

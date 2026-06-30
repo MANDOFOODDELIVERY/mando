@@ -1,119 +1,131 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import RestaurantBottomNav from "@/components/RestaurantBottomNav";
 import { MoneyIcon, TimerIcon } from "@/components/svgs/DefaultIcons";
+import useAuthStore from "@/store/authStore";
 import { useToastStore } from "@/store/toastStore";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 type RestaurantOrder = {
   id: string;
   orderNumber: string;
   customer: string;
-  status: "awaiting_restaurant" | "preparing" | "ready_for_pickup";
-  total: number;
-  placedAt: string;
+  status: "awaiting_restaurant" | "preparing" | "ready_for_pickup" | string;
+  totalAmount: number;
+  createdAt: string;
   address: string;
-  combos: { name: string; quantity: number; items: string[] }[];
+  items: { id: string; name: string; quantity: number; components: string[] }[];
 };
 
-const INITIAL_ORDERS: RestaurantOrder[] = [
-  {
-    id: "ord-1",
-    orderNumber: "MDO-1029",
-    customer: "Tolu A.",
-    status: "awaiting_restaurant",
-    total: 5400,
-    placedAt: "3 mins ago",
-    address: "Abiron Hostel, Fashina",
-    combos: [
-      {
-        name: "Jollof Rice + Chicken Combo",
-        quantity: 2,
-        items: ["2 spoons jollof rice", "1 medium chicken", "1 plantain side"],
-      },
-    ],
-  },
-  {
-    id: "ord-2",
-    orderNumber: "MDO-1028",
-    customer: "Bimpe O.",
-    status: "preparing",
-    total: 3200,
-    placedAt: "18 mins ago",
-    address: "NASFAT Area, Fashina",
-    combos: [
-      {
-        name: "Amala + Ewedu Combo",
-        quantity: 1,
-        items: ["2 wraps amala", "1 bowl ewedu", "1 beef portion"],
-      },
-    ],
-  },
-  {
-    id: "ord-3",
-    orderNumber: "MDO-1027",
-    customer: "Ife K.",
-    status: "ready_for_pickup",
-    total: 2500,
-    placedAt: "31 mins ago",
-    address: "Fajuyi Hall, Fashina",
-    combos: [
-      {
-        name: "Fried Rice + Turkey Combo",
-        quantity: 1,
-        items: ["2 spoons fried rice", "1 turkey piece", "1 coleslaw cup"],
-      },
-    ],
-  },
-];
+type RestaurantDashboardData = {
+  restaurant: {
+    name: string;
+    serviceArea: { name: string; city: string; state: string };
+  };
+  payout: { availableAmount: number };
+  orders: RestaurantOrder[];
+  stats: {
+    awaitingDecisionCount: number;
+    preparingCount: number;
+    readyForPickupCount: number;
+  };
+};
 
 export default function RestaurantDashboard() {
   const router = useRouter();
   const showToast = useToastStore((s) => s.showToast);
-  const [orders, setOrders] = useState(INITIAL_ORDERS);
+  const logoutAuth = useAuthStore((s) => s.logout);
+  const [dashboard, setDashboard] = useState<RestaurantDashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [rejectingOrder, setRejectingOrder] = useState<RestaurantOrder | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
 
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/restaurant/dashboard`, {
+        credentials: "include",
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        router.push("/restaurant/login");
+        return;
+      }
+
+      if (!response.ok) throw new Error("Unable to load restaurant dashboard");
+
+      setDashboard((await response.json()) as RestaurantDashboardData);
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Unable to load restaurant dashboard",
+        "error",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [router, showToast]);
+
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
+
+  const runOrderAction = async (
+    key: string,
+    endpoint: string,
+    body?: Record<string, unknown>,
+  ) => {
+    setBusyAction(key);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: "POST",
+        credentials: "include",
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      const result = (await response.json().catch(() => null)) as { message?: string } | null;
+      if (!response.ok) throw new Error(result?.message ?? "Unable to update order");
+
+      showToast("Order updated successfully", "success");
+      await loadDashboard();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to update order", "error");
+    } finally {
+      setBusyAction(null);
+      setRejectingOrder(null);
+    }
+  };
+
+  async function logout() {
+    setLoggingOut(true);
+
+    try {
+      await logoutAuth();
+      localStorage.clear();
+      showToast("Logged out successfully", "success");
+      router.push("/restaurant/login");
+    } catch {
+      showToast("Logout failed. Please try again.", "error");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
+  const orders = dashboard?.orders ?? [];
   const awaitingOrders = orders.filter((order) => order.status === "awaiting_restaurant");
   const preparingOrders = orders.filter((order) => order.status === "preparing");
   const readyOrders = orders.filter((order) => order.status === "ready_for_pickup");
-
-  const acceptOrder = (orderId: string) => {
-    setOrders((current) =>
-      current.map((order) =>
-        order.id === orderId ? { ...order, status: "preparing" } : order,
-      ),
-    );
-    showToast("Order accepted and moved to preparation", "success");
-  };
-
-  const markReady = (orderId: string) => {
-    setOrders((current) =>
-      current.map((order) =>
-        order.id === orderId ? { ...order, status: "ready_for_pickup" } : order,
-      ),
-    );
-    showToast("Order marked ready for rider pickup", "success");
-  };
-
-  const rejectOrder = () => {
-    if (!rejectingOrder) return;
-
-    setOrders((current) => current.filter((order) => order.id !== rejectingOrder.id));
-    showToast("Order rejected. Admin will be notified when backend is wired.", "success");
-    setRejectingOrder(null);
-  };
-
-  const logout = async () => {
-    setLoggingOut(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 350));
-    showToast("Logged out successfully", "success");
-    router.push("/restaurant/login");
-  };
+  const area = dashboard?.restaurant.serviceArea;
 
   return (
     <motion.div
@@ -126,8 +138,12 @@ export default function RestaurantDashboard() {
         <header className="mb-6 flex items-center justify-between gap-4">
           <div>
             <p className="text-sm font-semibold text-[#A4A4A4]">Restaurant dashboard</p>
-            <h1 className="mt-2 text-2xl font-bold text-[#141B34]">Mama Chef Cafe</h1>
-            <p className="mt-1 text-sm text-[#6B6B6B]">Fashina service area</p>
+            <h1 className="mt-2 text-2xl font-bold text-[#141B34]">
+              {loading ? "Loading restaurant..." : dashboard?.restaurant.name ?? "Restaurant"}
+            </h1>
+            <p className="mt-1 text-sm text-[#6B6B6B]">
+              {area ? `${area.name}, ${area.city}` : "Checking service area"}
+            </p>
           </div>
           <button
             type="button"
@@ -140,57 +156,89 @@ export default function RestaurantDashboard() {
         </header>
 
         <section className="mb-6 grid gap-4 sm:grid-cols-2">
-          <StatCard label="Awaiting decision" value={`${awaitingOrders.length}`} helper="Accept or reject quickly" icon={<TimerIcon />} />
-          <StatCard label="Available payout" value="₦42,800" helper="Last updated today" icon={<MoneyIcon />} />
+          <StatCard
+            label="Awaiting decision"
+            value={`${dashboard?.stats.awaitingDecisionCount ?? 0}`}
+            helper="Accept or reject quickly"
+            icon={<TimerIcon />}
+          />
+          <StatCard
+            label="Available payout"
+            value={formatCurrency(dashboard?.payout.availableAmount ?? 0)}
+            helper="Admin reviews every payout request"
+            icon={<MoneyIcon />}
+          />
         </section>
 
-        <OrderSection
-          title="Needs your decision"
-          subtitle="Rejecting an order will notify admin for follow-up."
-          orders={awaitingOrders}
-          emptyText="No new orders awaiting decision."
-          action={(order) => (
-            <div className="mt-4 grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                className="rounded-2xl border border-[#E53E3E] px-4 py-3 text-sm font-semibold text-[#E53E3E]"
-                onClick={() => setRejectingOrder(order)}
-              >
-                Reject
-              </button>
-              <button
-                type="button"
-                className="rounded-2xl bg-[#141B34] px-4 py-3 text-sm font-semibold text-white"
-                onClick={() => acceptOrder(order.id)}
-              >
-                Accept
-              </button>
-            </div>
-          )}
-        />
+        {loading ? (
+          <DashboardSkeleton />
+        ) : (
+          <>
+            <OrderSection
+              title="Needs your decision"
+              subtitle="Rejecting an order will notify admin for follow-up."
+              orders={awaitingOrders}
+              emptyText="No new orders awaiting decision."
+              busyAction={busyAction}
+              action={(order) => (
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    disabled={busyAction === `${order.id}-reject`}
+                    className="rounded-2xl border border-[#E53E3E] px-4 py-3 text-sm font-semibold text-[#E53E3E] disabled:opacity-60"
+                    onClick={() => setRejectingOrder(order)}
+                  >
+                    Reject
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyAction === `${order.id}-accept`}
+                    className="rounded-2xl bg-[#141B34] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                    onClick={() =>
+                      void runOrderAction(
+                        `${order.id}-accept`,
+                        `/restaurant/orders/${order.id}/accept`,
+                      )
+                    }
+                  >
+                    {busyAction === `${order.id}-accept` ? "Accepting..." : "Accept"}
+                  </button>
+                </div>
+              )}
+            />
 
-        <OrderSection
-          title="Preparing now"
-          subtitle="Mark ready only when rider can pick it up."
-          orders={preparingOrders}
-          emptyText="No orders in preparation."
-          action={(order) => (
-            <button
-              type="button"
-              className="mt-4 w-full rounded-2xl bg-[#DFB400] px-4 py-3 text-sm font-semibold text-[#141B34]"
-              onClick={() => markReady(order.id)}
-            >
-              Ready for pickup
-            </button>
-          )}
-        />
+            <OrderSection
+              title="Preparing now"
+              subtitle="Mark ready only when rider can pick it up."
+              orders={preparingOrders}
+              emptyText="No orders in preparation."
+              busyAction={busyAction}
+              action={(order) => (
+                <button
+                  type="button"
+                  disabled={busyAction === `${order.id}-ready`}
+                  className="mt-4 w-full rounded-2xl bg-[#DFB400] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                  onClick={() =>
+                    void runOrderAction(
+                      `${order.id}-ready`,
+                      `/restaurant/orders/${order.id}/ready`,
+                    )
+                  }
+                >
+                  {busyAction === `${order.id}-ready` ? "Updating..." : "Ready for pickup"}
+                </button>
+              )}
+            />
 
-        <OrderSection
-          title="Ready for pickup"
-          subtitle="These orders are waiting for rider assignment."
-          orders={readyOrders}
-          emptyText="No orders ready for pickup."
-        />
+            <OrderSection
+              title="Ready for pickup"
+              subtitle="These orders are waiting for rider assignment."
+              orders={readyOrders}
+              emptyText="No orders ready for pickup."
+              busyAction={busyAction}
+            />
+          </>
+        )}
       </div>
 
       <RestaurantBottomNav />
@@ -200,9 +248,20 @@ export default function RestaurantDashboard() {
         title="Reject order?"
         description="Admin will be notified so they can follow up with the customer and restaurant."
         confirmLabel="Reject"
+        confirming={rejectingOrder ? busyAction === `${rejectingOrder.id}-reject` : false}
         danger
         onClose={() => setRejectingOrder(null)}
-        onConfirm={rejectOrder}
+        onConfirm={() => {
+          if (!rejectingOrder) return;
+          void runOrderAction(
+            `${rejectingOrder.id}-reject`,
+            `/restaurant/orders/${rejectingOrder.id}/reject`,
+            {
+              reasonCode: "combo_unavailable",
+              note: "Combo unavailable at restaurant.",
+            },
+          );
+        }}
       />
 
       <ConfirmationModal
@@ -258,6 +317,7 @@ function OrderSection({
   subtitle: string;
   orders: RestaurantOrder[];
   emptyText: string;
+  busyAction: string | null;
   action?: (order: RestaurantOrder) => React.ReactNode;
 }) {
   return (
@@ -276,19 +336,19 @@ function OrderSection({
             <div key={order.id} className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm text-[#A4A4A4]">{order.placedAt}</p>
+                  <p className="text-sm text-[#A4A4A4]">{formatDate(order.createdAt)}</p>
                   <h3 className="mt-2 text-lg font-semibold text-[#141B34]">{order.orderNumber}</h3>
                   <p className="mt-1 text-sm text-[#6B6B6B]">{order.customer} - {order.address}</p>
                 </div>
-                <p className="text-sm font-semibold text-[#141B34]">₦{order.total.toLocaleString()}</p>
+                <p className="text-sm font-semibold text-[#141B34]">{formatCurrency(order.totalAmount)}</p>
               </div>
               <div className="mt-4 space-y-3">
-                {order.combos.map((combo) => (
-                  <div key={combo.name} className="rounded-2xl bg-[#F7F7F7] p-4">
-                    <p className="font-semibold text-[#141B34]">{combo.name} x{combo.quantity}</p>
+                {order.items.map((item) => (
+                  <div key={item.id} className="rounded-2xl bg-[#F7F7F7] p-4">
+                    <p className="font-semibold text-[#141B34]">{item.name} x{item.quantity}</p>
                     <div className="mt-2 space-y-1">
-                      {combo.items.map((item) => (
-                        <p key={item} className="text-sm text-[#6B6B6B]">{item}</p>
+                      {item.components.map((component) => (
+                        <p key={component} className="text-sm text-[#6B6B6B]">{component}</p>
                       ))}
                     </div>
                   </div>
@@ -301,4 +361,34 @@ function OrderSection({
       </div>
     </section>
   );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-4">
+      {[0, 1, 2].map((item) => (
+        <div
+          key={item}
+          className="h-44 animate-pulse rounded-[28px] border border-gray-200 bg-white"
+        />
+      ))}
+    </div>
+  );
+}
+
+function formatCurrency(amount: number) {
+  return new Intl.NumberFormat("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-NG", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }

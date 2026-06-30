@@ -4,10 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { CautionIcon, EyeIcon, EyeOffIcon, PasswordIcon } from "@/components/svgs/DefaultIcons";
+import { useAuthStore } from "@/store/authStore";
 import { useToastStore } from "@/store/toastStore";
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
 
 export default function RestaurantLogin() {
   const router = useRouter();
+  const setAuth = useAuthStore((s) => s.setAuth);
   const showToast = useToastStore((s) => s.showToast);
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -38,9 +43,34 @@ export default function RestaurantLogin() {
     }
 
     setLoading(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 450));
-    showToast("Restaurant login UI is ready for backend wiring", "success");
-    router.push("/restaurant/dashboard");
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/restaurant/login`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formData),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(result?.message ?? "Unable to sign in as restaurant");
+      }
+
+      setAuth(result);
+      showToast("Logged in as restaurant", "success");
+      router.push("/restaurant/dashboard");
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Unable to sign in as restaurant",
+        "error",
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

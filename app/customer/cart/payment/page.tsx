@@ -245,7 +245,7 @@ export default function PaymentPage() {
           type="button"
           disabled={creatingOrder || startingCheckout}
           onClick={confirmPayment}
-          className="w-full rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           {creatingOrder || startingCheckout ? "Starting checkout..." : "Pay with RoutePay"}
         </button>

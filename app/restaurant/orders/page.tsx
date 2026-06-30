@@ -1,55 +1,82 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import RestaurantBottomNav from "@/components/RestaurantBottomNav";
 import { ArrowLeftIcon } from "@/components/svgs/DefaultIcons";
+import { useToastStore } from "@/store/toastStore";
 
-const ORDERS = [
-  {
-    id: "MDO-1029",
-    status: "Awaiting decision",
-    customer: "Tolu A.",
-    total: 5400,
-    time: "3 mins ago",
-    items: "Jollof Rice + Chicken Combo x2",
-  },
-  {
-    id: "MDO-1028",
-    status: "Preparing",
-    customer: "Bimpe O.",
-    total: 3200,
-    time: "18 mins ago",
-    items: "Amala + Ewedu Combo x1",
-  },
-  {
-    id: "MDO-1027",
-    status: "Ready for pickup",
-    customer: "Ife K.",
-    total: 2500,
-    time: "31 mins ago",
-    items: "Fried Rice + Turkey Combo x1",
-  },
-  {
-    id: "MDO-1021",
-    status: "Completed",
-    customer: "Seyi M.",
-    total: 6800,
-    time: "Yesterday",
-    items: "Party Rice Combo x2",
-  },
-];
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+
+type RestaurantOrder = {
+  id: string;
+  orderNumber: string;
+  status: string;
+  customer: string;
+  totalAmount: number;
+  createdAt: string;
+  items: { id: string; name: string; quantity: number }[];
+};
 
 const FILTERS = ["All", "Awaiting decision", "Preparing", "Ready for pickup", "Completed"];
 
-export default function RestaurantOrders() {
-  const [activeFilter, setActiveFilter] = useState("All");
+function getStatusLabel(status: string) {
+  if (status === "awaiting_restaurant") return "Awaiting decision";
+  if (status === "ready_for_pickup") return "Ready for pickup";
+  return status
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
-  const visibleOrders =
-    activeFilter === "All"
-      ? ORDERS
-      : ORDERS.filter((order) => order.status === activeFilter);
+export default function RestaurantOrders() {
+  const router = useRouter();
+  const showToast = useToastStore((s) => s.showToast);
+  const [orders, setOrders] = useState<RestaurantOrder[]>([]);
+  const [activeFilter, setActiveFilter] = useState("All");
+  const [loading, setLoading] = useState(true);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/restaurant/orders`, {
+        credentials: "include",
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        router.push("/restaurant/login");
+        return;
+      }
+
+      if (!response.ok) throw new Error("Unable to load restaurant orders");
+
+      const data = (await response.json()) as { orders: RestaurantOrder[] };
+      setOrders(data.orders);
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Unable to load restaurant orders",
+        "error",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [router, showToast]);
+
+  useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
+
+  const visibleOrders = useMemo(
+    () =>
+      activeFilter === "All"
+        ? orders
+        : orders.filter((order) => getStatusLabel(order.status) === activeFilter),
+    [activeFilter, orders],
+  );
 
   return (
     <motion.div
@@ -86,26 +113,32 @@ export default function RestaurantOrders() {
         </section>
 
         <section className="space-y-4">
-          {visibleOrders.map((order) => (
-            <div key={order.id} className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm text-[#A4A4A4]">{order.time}</p>
-                  <h2 className="mt-2 text-lg font-semibold text-[#141B34]">{order.id}</h2>
-                  <p className="mt-1 text-sm text-[#6B6B6B]">{order.customer}</p>
+          {loading ? (
+            <OrdersSkeleton />
+          ) : (
+            visibleOrders.map((order) => (
+              <div key={order.id} className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-[#A4A4A4]">{formatDate(order.createdAt)}</p>
+                    <h2 className="mt-2 text-lg font-semibold text-[#141B34]">{order.orderNumber}</h2>
+                    <p className="mt-1 text-sm text-[#6B6B6B]">{order.customer}</p>
+                  </div>
+                  <span className="rounded-2xl bg-[#FFF7E0] px-3 py-2 text-xs font-semibold text-[#141B34]">
+                    {getStatusLabel(order.status)}
+                  </span>
                 </div>
-                <span className="rounded-2xl bg-[#FFF7E0] px-3 py-2 text-xs font-semibold text-[#141B34]">
-                  {order.status}
-                </span>
+                <div className="mt-4 rounded-2xl bg-[#F7F7F7] p-4">
+                  <p className="text-sm font-semibold text-[#141B34]">
+                    {order.items.map((item) => `${item.name} x${item.quantity}`).join(", ")}
+                  </p>
+                  <p className="mt-2 text-sm text-[#6B6B6B]">{formatCurrency(order.totalAmount)}</p>
+                </div>
               </div>
-              <div className="mt-4 rounded-2xl bg-[#F7F7F7] p-4">
-                <p className="text-sm font-semibold text-[#141B34]">{order.items}</p>
-                <p className="mt-2 text-sm text-[#6B6B6B]">₦{order.total.toLocaleString()}</p>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
 
-          {visibleOrders.length === 0 && (
+          {!loading && visibleOrders.length === 0 && (
             <div className="rounded-[28px] border border-dashed border-gray-300 bg-white p-6 text-center text-sm font-semibold text-[#6B6B6B]">
               No orders in this category.
             </div>
@@ -116,4 +149,34 @@ export default function RestaurantOrders() {
       <RestaurantBottomNav />
     </motion.div>
   );
+}
+
+function OrdersSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((item) => (
+        <div
+          key={item}
+          className="h-36 animate-pulse rounded-[28px] border border-gray-200 bg-white"
+        />
+      ))}
+    </>
+  );
+}
+
+function formatCurrency(amount: number) {
+  return new Intl.NumberFormat("en-NG", {
+    style: "currency",
+    currency: "NGN",
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-NG", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }

@@ -221,7 +221,7 @@ export default function SalesAgentDashboard() {
                     </button>
                     <button
                       type="button"
-                      className="inline-flex items-center justify-center rounded-2xl bg-[#DFB400] px-5 py-3 text-sm font-semibold text-[#141B34]"
+                      className="inline-flex items-center justify-center rounded-2xl bg-[#DFB400] px-5 py-3 text-sm font-semibold text-white"
                       onClick={() => void shareInfluencerLink()}
                     >
                       Share
