@@ -23,6 +23,25 @@ type SavedAddress = {
   };
 };
 
+type CreateOrderResponse = {
+  order: {
+    id: string;
+    orderNumber: string;
+    status: string;
+    totalAmount: number;
+    currency: string;
+  };
+};
+
+type RoutePayInitiateResponse = {
+  payment: {
+    provider: "routepay";
+    redirectUrl: string;
+    transactionReference: string | null;
+    merchantReference: string;
+  };
+};
+
 function formatAddress(address: SavedAddress) {
   return `${address.streetAddress}, ${address.serviceArea.name}`;
 }
@@ -62,11 +81,13 @@ const CartPage = () => {
   const phoneNumber = useCartStore((s) => s.phoneNumber);
   const setDeliveryAddress = useCartStore((s) => s.setDeliveryAddress);
   const setPhoneNumber = useCartStore((s) => s.setPhoneNumber);
+  const setCheckoutOrder = useCartStore((s) => s.setCheckoutOrder);
   const showToast = useToastStore((s) => s.showToast);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [inputPhone, setInputPhone] = useState(phoneNumber);
   const [savingPhone, setSavingPhone] = useState(false);
   const [hasDeliveryAddress, setHasDeliveryAddress] = useState(false);
+  const [startingPayment, setStartingPayment] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -128,7 +149,7 @@ const CartPage = () => {
   const savedPhone = auth?.profile?.phone ?? phoneNumber;
   const checkoutReady = Boolean(auth && hasDeliveryAddress && savedPhone);
 
-  function proceedToPayment() {
+  async function proceedToPayment() {
     if (!auth) {
       showToast("Please log in to continue to payment", "error");
       router.push("/login");
@@ -148,7 +169,68 @@ const CartPage = () => {
       return;
     }
 
-    router.push("/customer/cart/payment");
+    setStartingPayment(true);
+
+    try {
+      const orderResponse = await fetch(`${API_BASE_URL}/customer/orders`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          paymentMethod: "card",
+          items: items.map((item) => ({
+            comboId: item.id,
+            quantity: item.quantity,
+            components: item.components?.map((component) => ({
+              menuItemId: component.menuItemId,
+              quantity: component.quantity,
+            })),
+          })),
+        }),
+      });
+
+      const orderData = (await orderResponse.json().catch(() => null)) as
+        | CreateOrderResponse
+        | { message?: string }
+        | null;
+
+      if (!orderResponse.ok || !orderData || !("order" in orderData)) {
+        throw new Error(getResponseMessage(orderData) ?? "Unable to create order");
+      }
+
+      setCheckoutOrder(orderData.order);
+
+      const routePayResponse = await fetch(`${API_BASE_URL}/customer/payments/routepay/initiate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          orderId: orderData.order.id,
+        }),
+      });
+
+      const routePayData = (await routePayResponse.json().catch(() => null)) as
+        | RoutePayInitiateResponse
+        | { message?: string }
+        | null;
+
+      if (!routePayResponse.ok || !routePayData || !("payment" in routePayData)) {
+        throw new Error(getResponseMessage(routePayData) ?? "Unable to start RoutePay checkout");
+      }
+
+      showToast("Redirecting to RoutePay checkout", "success");
+      window.location.assign(routePayData.payment.redirectUrl);
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Unable to start RoutePay checkout",
+        "error",
+      );
+      setStartingPayment(false);
+    }
   }
 
   if (items.length === 0) {
@@ -254,13 +336,14 @@ const CartPage = () => {
 
         <button
           type="button"
-          aria-disabled={!checkoutReady}
-          onClick={proceedToPayment}
+          disabled={startingPayment}
+          aria-disabled={!checkoutReady || startingPayment}
+          onClick={() => void proceedToPayment()}
           className={`w-full mt-2 rounded-xl py-4 text-[16px] font-semibold text-white ${
-            checkoutReady ? "bg-[#DFB400]" : "bg-[#DFB400]/50 cursor-not-allowed"
+            checkoutReady && !startingPayment ? "bg-[#DFB400]" : "bg-[#DFB400]/50 cursor-not-allowed"
           }`}
         >
-          Proceed to payment
+          {startingPayment ? "Opening RoutePay..." : "Proceed to payment"}
         </button>
       </section>
 
@@ -277,5 +360,14 @@ const CartPage = () => {
     </div>
   );
 };
+
+function getResponseMessage(value: unknown) {
+  if (value && typeof value === "object" && "message" in value) {
+    const message = (value as { message?: unknown }).message;
+    return typeof message === "string" ? message : null;
+  }
+
+  return null;
+}
 
 export default CartPage;

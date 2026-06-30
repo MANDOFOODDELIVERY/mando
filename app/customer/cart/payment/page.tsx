@@ -3,19 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeftIcon, CopyIcon } from "@/components/svgs/DefaultIcons";
+import { ArrowLeftIcon } from "@/components/svgs/DefaultIcons";
 import useAuthStore from "@/store/authStore";
 import useCartStore from "@/store/cartStore";
 import { useToastStore } from "@/store/toastStore";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
-
-const PAYMENT_DETAILS = [
-  { label: "Account name", value: "Mando Food Ltd" },
-  { label: "Bank name", value: "First Bank" },
-  { label: "Account number", value: "1234567890" },
-];
 
 type SavedAddress = {
   id: string;
@@ -32,6 +26,15 @@ type CreateOrderResponse = {
   };
 };
 
+type RoutePayInitiateResponse = {
+  payment: {
+    provider: "routepay";
+    redirectUrl: string;
+    transactionReference: string | null;
+    merchantReference: string;
+  };
+};
+
 export default function PaymentPage() {
   const router = useRouter();
   const auth = useAuthStore((s) => s.auth);
@@ -42,6 +45,7 @@ export default function PaymentPage() {
   const showToast = useToastStore((s) => s.showToast);
   const [checkingRequirements, setCheckingRequirements] = useState(true);
   const [creatingOrder, setCreatingOrder] = useState(false);
+  const [startingCheckout, setStartingCheckout] = useState(false);
   const [createdOrder, setCreatedOrder] = useState<CreateOrderResponse["order"] | null>(null);
 
   useEffect(() => {
@@ -108,12 +112,6 @@ export default function PaymentPage() {
     };
   }, [fetchCurrentUser, items.length, router, showToast]);
 
-  const copyToClipboard = async (value: string) => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      await navigator.clipboard.writeText(value);
-    }
-  };
-
   async function createOrder() {
     if (createdOrder) return createdOrder;
 
@@ -127,7 +125,7 @@ export default function PaymentPage() {
         },
         credentials: "include",
         body: JSON.stringify({
-          paymentMethod: "bank_transfer",
+          paymentMethod: "card",
           items: items.map((item) => ({
             comboId: item.id,
             quantity: item.quantity,
@@ -167,7 +165,38 @@ export default function PaymentPage() {
 
     if (!order) return;
 
-    router.push(`/customer/cart/payment-processing?orderId=${order.id}`);
+    setStartingCheckout(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customer/payments/routepay/initiate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          orderId: order.id,
+        }),
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | RoutePayInitiateResponse
+        | { message?: string }
+        | null;
+
+      if (!response.ok || !data || !("payment" in data)) {
+        throw new Error(getResponseMessage(data) ?? "Unable to start RoutePay checkout");
+      }
+
+      showToast("Redirecting to RoutePay checkout", "success");
+      window.location.assign(data.payment.redirectUrl);
+    } catch (error) {
+      showToast(
+        error instanceof Error ? error.message : "Unable to start RoutePay checkout",
+        "error",
+      );
+      setStartingCheckout(false);
+    }
   }
 
   if (!auth || checkingRequirements) {
@@ -193,27 +222,20 @@ export default function PaymentPage() {
         <div className="rounded-3xl bg-white p-6 shadow-sm border border-gray-200 space-y-6">
           <div>
             <p className="text-sm text-[#A4A4A4]">Payment method</p>
-            <h1 className="text-[24px] font-semibold mt-2">Bank transfer</h1>
+            <h1 className="text-[24px] font-semibold mt-2">RoutePay checkout</h1>
           </div>
 
-          <div className="space-y-4">
-            <p className="text-[#6B6B6B]">Use the details below to transfer your payment. After transfer, return to confirm with the button below.</p>
-
-            {PAYMENT_DETAILS.map((detail) => (
-              <div key={detail.label} className="flex items-center justify-between rounded-2xl border border-gray-200 bg-[#FAFAFA] p-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.15em] text-[#A4A4A4]">{detail.label}</p>
-                  <p className="mt-2 font-semibold text-[#1F1F1F]">{detail.value}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => copyToClipboard(detail.value)}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white border border-gray-200 shadow-sm"
-                >
-                  <CopyIcon />
-                </button>
-              </div>
-            ))}
+          <div className="space-y-4 text-[#6B6B6B]">
+            <p>
+              We&apos;ll create your order, then send you to RoutePay&apos;s hosted
+              checkout page to complete payment securely.
+            </p>
+            <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] p-4">
+              <p className="text-xs uppercase tracking-[0.15em] text-[#A4A4A4]">Amount</p>
+              <p className="mt-2 text-2xl font-semibold text-[#141B34]">
+                ₦{items.reduce((sum, item) => sum + item.price * item.quantity, 0).toLocaleString()}
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -221,13 +243,22 @@ export default function PaymentPage() {
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t p-4">
         <button
           type="button"
-          disabled={creatingOrder}
+          disabled={creatingOrder || startingCheckout}
           onClick={confirmPayment}
           className="w-full rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-black disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {creatingOrder ? "Creating order..." : "I've made the payment"}
+          {creatingOrder || startingCheckout ? "Starting checkout..." : "Pay with RoutePay"}
         </button>
       </div>
     </div>
   );
+}
+
+function getResponseMessage(value: unknown) {
+  if (value && typeof value === "object" && "message" in value) {
+    const message = (value as { message?: unknown }).message;
+    return typeof message === "string" ? message : null;
+  }
+
+  return null;
 }

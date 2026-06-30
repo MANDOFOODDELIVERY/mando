@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import ConfirmationModal from "@/components/ConfirmationModal";
 import { CopyIcon, TimerIcon } from "@/components/svgs/DefaultIcons";
 import SalesAgentBottomNav from "@/components/SalesAgentBottomNav";
 import SalesAgentComboCard from "@/components/cards/SalesAgentComboCard";
+import useAuthStore from "@/store/authStore";
 import { useToastStore } from "@/store/toastStore";
 
 const API_BASE_URL =
@@ -47,8 +49,11 @@ type SalesDashboard = {
 export default function SalesAgentDashboard() {
   const router = useRouter();
   const showToast = useToastStore((s) => s.showToast);
+  const logoutAuth = useAuthStore((s) => s.logout);
   const [dashboard, setDashboard] = useState<SalesDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [showLogoutConfirmation, setShowLogoutConfirmation] = useState(false);
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -106,6 +111,25 @@ export default function SalesAgentDashboard() {
     showToast("Influencer referral text copied", "success");
   };
 
+  async function logout() {
+    setLoggingOut(true);
+
+    try {
+      await logoutAuth();
+
+      if (typeof window !== "undefined") {
+        localStorage.clear();
+      }
+
+      showToast("Logged out successfully", "success");
+      router.push("/sales-agent/login");
+    } catch {
+      showToast("Logout failed. Please try again.", "error");
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -128,8 +152,28 @@ export default function SalesAgentDashboard() {
               </p>
             )}
           </div>
-          <div className="rounded-3xl bg-[#FFF7E0] p-3">
-            <TimerIcon />
+          <div className="flex items-center gap-2">
+            {dashboard ? (
+              <button
+                type="button"
+                disabled={loggingOut}
+                className="rounded-2xl bg-[#E53E3E] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                onClick={() => setShowLogoutConfirmation(true)}
+              >
+                {loggingOut ? "Logging out..." : "Logout"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rounded-2xl bg-[#141B34] px-4 py-3 text-sm font-semibold text-white"
+                onClick={() => router.push("/sales-agent/login")}
+              >
+                Login
+              </button>
+            )}
+            <div className="rounded-3xl bg-[#FFF7E0] p-3">
+              <TimerIcon />
+            </div>
           </div>
         </header>
 
@@ -221,6 +265,19 @@ export default function SalesAgentDashboard() {
         )}
       </div>
       <SalesAgentBottomNav />
+      <ConfirmationModal
+        open={showLogoutConfirmation}
+        title="Log out?"
+        description="You will need to log in again before viewing your sales agent dashboard or sharing tracked combo links."
+        confirmLabel="Logout"
+        confirming={loggingOut}
+        danger
+        onClose={() => setShowLogoutConfirmation(false)}
+        onConfirm={() => {
+          setShowLogoutConfirmation(false);
+          void logout();
+        }}
+      />
     </motion.div>
   );
 }
