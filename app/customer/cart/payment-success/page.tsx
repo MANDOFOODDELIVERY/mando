@@ -9,7 +9,6 @@ export default function PaymentSuccessPage() {
   const deliveryAddress = useCartStore((s) => s.deliveryAddress);
   const items = useCartStore((s) => s.items);
   const checkoutOrder = useCartStore((s) => s.checkoutOrder);
-  const clearCart = useCartStore((s) => s.clear);
   const [queryOrderId, setQueryOrderId] = useState<string | null>(null);
   const [queryOrderNumber, setQueryOrderNumber] = useState<string | null>(null);
   const [snapshot] = useState(() => ({
@@ -23,7 +22,6 @@ export default function PaymentSuccessPage() {
 
     setQueryOrderId(query.get("orderId"));
     setQueryOrderNumber(query.get("orderNumber"));
-    clearCart();
   }, []);
 
   const orderId =

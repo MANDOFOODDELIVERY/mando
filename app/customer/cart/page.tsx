@@ -12,8 +12,6 @@ import BottomNav from "@/components/BottomNav";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
-const SKIP_ROUTEPAY_REDIRECT =
-  process.env.NEXT_PUBLIC_SKIP_ROUTEPAY_REDIRECT === "true";
 const DELIVERY_FEE_AMOUNT = 400;
 const SERVICE_CHARGE_AMOUNT = 50;
 
@@ -37,9 +35,9 @@ type CreateOrderResponse = {
   };
 };
 
-type RoutePayInitiateResponse = {
+type PaymentInitiateResponse = {
   payment: {
-    provider: "routepay";
+    provider: string;
     redirectUrl: string;
     transactionReference: string | null;
     merchantReference: string;
@@ -92,37 +90,49 @@ const CartPage = () => {
   const [inputPhone, setInputPhone] = useState(phoneNumber);
   const [savingPhone, setSavingPhone] = useState(false);
   const [hasDeliveryAddress, setHasDeliveryAddress] = useState(false);
+  const [checkingCheckoutDetails, setCheckingCheckoutDetails] = useState(true);
   const [startingPayment, setStartingPayment] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
-    fetchCurrentUser("customer").then((currentAuth) => {
-      if (!mounted || !currentAuth?.profile?.phone) return;
+    async function loadCheckoutDetails() {
+      setCheckingCheckoutDetails(true);
 
-      setPhoneNumber(currentAuth.profile.phone);
-      setInputPhone(currentAuth.profile.phone);
-    });
+      try {
+        const [currentAuth, addressesResponse] = await Promise.all([
+          fetchCurrentUser("customer"),
+          fetch(`${API_BASE_URL}/customer/addresses`, {
+            credentials: "include",
+          }),
+        ]);
 
-    fetch(`${API_BASE_URL}/customer/addresses`, {
-      credentials: "include",
-    })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        return response.json() as Promise<{ addresses: SavedAddress[] }>;
-      })
-      .then((data) => {
-        if (!mounted || !data) return;
+        if (!mounted) return;
 
-        const defaultAddress = data.addresses.find((address) => address.isDefault) ?? data.addresses[0];
-        if (defaultAddress) {
-          setDeliveryAddress(formatAddress(defaultAddress));
-          setHasDeliveryAddress(true);
-        } else {
-          setDeliveryAddress("Add delivery address");
-          setHasDeliveryAddress(false);
+        if (currentAuth?.profile?.phone) {
+          setPhoneNumber(currentAuth.profile.phone);
+          setInputPhone(currentAuth.profile.phone);
         }
-      });
+
+        if (addressesResponse.ok) {
+          const data = (await addressesResponse.json()) as { addresses: SavedAddress[] };
+          const defaultAddress =
+            data.addresses.find((address) => address.isDefault) ?? data.addresses[0];
+
+          if (defaultAddress) {
+            setDeliveryAddress(formatAddress(defaultAddress));
+            setHasDeliveryAddress(true);
+          } else {
+            setDeliveryAddress("Add delivery address");
+            setHasDeliveryAddress(false);
+          }
+        }
+      } finally {
+        if (mounted) setCheckingCheckoutDetails(false);
+      }
+    }
+
+    void loadCheckoutDetails();
 
     return () => {
       mounted = false;
@@ -152,7 +162,7 @@ const CartPage = () => {
   }
 
   const savedPhone = auth?.profile?.phone ?? phoneNumber;
-  const checkoutReady = Boolean(auth && hasDeliveryAddress && savedPhone);
+  const checkoutReady = Boolean(auth && hasDeliveryAddress && savedPhone && !checkingCheckoutDetails);
 
   async function proceedToPayment() {
     if (!auth) {
@@ -207,13 +217,7 @@ const CartPage = () => {
 
       setCheckoutOrder(orderData.order);
 
-      if (SKIP_ROUTEPAY_REDIRECT) {
-        showToast(`Order ${orderData.order.orderNumber} created for testing`, "success");
-        router.push("/customer/cart/payment-success");
-        return;
-      }
-
-      const routePayResponse = await fetch(`${API_BASE_URL}/customer/payments/routepay/initiate`, {
+      const checkoutResponse = await fetch(`${API_BASE_URL}/customer/payments/checkout/initiate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -224,20 +228,20 @@ const CartPage = () => {
         }),
       });
 
-      const routePayData = (await routePayResponse.json().catch(() => null)) as
-        | RoutePayInitiateResponse
+      const checkoutData = (await checkoutResponse.json().catch(() => null)) as
+        | PaymentInitiateResponse
         | { message?: string }
         | null;
 
-      if (!routePayResponse.ok || !routePayData || !("payment" in routePayData)) {
-        throw new Error(getResponseMessage(routePayData) ?? "Unable to start RoutePay checkout");
+      if (!checkoutResponse.ok || !checkoutData || !("payment" in checkoutData)) {
+        throw new Error(getResponseMessage(checkoutData) ?? "Unable to start checkout");
       }
 
-      showToast("Redirecting to RoutePay checkout", "success");
-      window.location.assign(routePayData.payment.redirectUrl);
+      showToast("Opening secure payment checkout", "success");
+      window.location.assign(checkoutData.payment.redirectUrl);
     } catch (error) {
       showToast(
-        error instanceof Error ? error.message : "Unable to start RoutePay checkout",
+        error instanceof Error ? error.message : "Unable to start checkout",
         "error",
       );
       setStartingPayment(false);
@@ -359,7 +363,11 @@ const CartPage = () => {
             checkoutReady && !startingPayment ? "bg-[#DFB400]" : "bg-[#DFB400]/50 cursor-not-allowed"
           }`}
         >
-          {startingPayment ? "Opening RoutePay..." : "Proceed to payment"}
+          {checkingCheckoutDetails
+            ? "Checking details..."
+            : startingPayment
+              ? "Opening checkout..."
+              : "Proceed to payment"}
         </button>
       </section>
 

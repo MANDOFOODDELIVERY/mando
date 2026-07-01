@@ -44,6 +44,10 @@ const rejectOrderBodySchema = z.object({
   note: z.string().trim().min(1).max(500),
 })
 
+const notificationParamsSchema = z.object({
+  notificationId: z.uuid(),
+})
+
 export async function restaurantRoutes(app: FastifyInstance) {
   app.post('/login', async (request, reply) => {
     const parsedBody = loginBodySchema.safeParse(request.body)
@@ -168,6 +172,43 @@ export async function restaurantRoutes(app: FastifyInstance) {
     return reply.status(200).send({
       orders: await getRestaurantOrders(context.restaurant.id),
     })
+  })
+
+  app.get('/notifications', async (request, reply) => {
+    const context = await requireRestaurant(request.headers.cookie, reply)
+    if (!context) return
+
+    return reply.status(200).send({
+      notifications: await getUserNotifications(context.userId),
+    })
+  })
+
+  app.patch('/notifications/:notificationId/read', async (request, reply) => {
+    const context = await requireRestaurant(request.headers.cookie, reply)
+    if (!context) return
+
+    const params = notificationParamsSchema.safeParse(request.params)
+    if (!params.success) return sendInvalidNotification(reply)
+
+    const notification = await markUserNotificationRead(
+      context.userId,
+      params.data.notificationId,
+    )
+
+    if (!notification) return sendNotificationNotFound(reply)
+    return reply.status(200).send({ notification })
+  })
+
+  app.post('/notifications/read-all', async (request, reply) => {
+    const context = await requireRestaurant(request.headers.cookie, reply)
+    if (!context) return
+
+    await database
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(eq(notifications.userId, context.userId))
+
+    return reply.status(204).send()
   })
 
   app.post('/orders/:orderId/accept', async (request, reply) => {
@@ -631,6 +672,50 @@ function getRestaurantPayoutRequests(restaurantId: string) {
     .where(eq(payoutRequests.restaurantId, restaurantId))
     .orderBy(desc(payoutRequests.requestedAt))
     .limit(10)
+}
+
+function getUserNotifications(userId: string) {
+  return database
+    .select({
+      id: notifications.id,
+      type: notifications.type,
+      title: notifications.title,
+      body: notifications.body,
+      data: notifications.data,
+      readAt: notifications.readAt,
+      createdAt: notifications.createdAt,
+    })
+    .from(notifications)
+    .where(eq(notifications.userId, userId))
+    .orderBy(desc(notifications.createdAt))
+    .limit(50)
+}
+
+async function markUserNotificationRead(userId: string, notificationId: string) {
+  const [notification] = await database
+    .update(notifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    .returning({
+      id: notifications.id,
+      readAt: notifications.readAt,
+    })
+
+  return notification ?? null
+}
+
+function sendInvalidNotification(reply: FastifyReply) {
+  return reply.status(400).send({
+    error: 'validation_error',
+    message: 'Please choose a valid notification.',
+  })
+}
+
+function sendNotificationNotFound(reply: FastifyReply) {
+  return reply.status(404).send({
+    error: 'notification_not_found',
+    message: 'Notification not found.',
+  })
 }
 
 function sendInvalidLogin(reply: FastifyReply) {

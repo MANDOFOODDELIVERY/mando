@@ -23,6 +23,7 @@ import {
   profiles,
   referrals,
   restaurantEarnings,
+  restaurantMembers,
   restaurants,
   salesAgentProfiles,
   serviceAreas,
@@ -71,6 +72,7 @@ const createOrderBodySchema = z.object({
     .enum(['bank_transfer', 'card', 'bank', 'ussd', 'wallet'])
     .default('card'),
   customerNote: z.string().trim().max(500).nullable().optional(),
+  testBypassPayment: z.boolean().optional(),
   items: z
     .array(
       z.object({
@@ -683,6 +685,11 @@ export async function customerRoutes(app: FastifyInstance) {
     )
     const restaurantNetAmount = subtotalAmount - restaurantPlatformFeeAmount
     const firstOrderReferral = await getUnqualifiedCustomerReferral(sessionContext.userId)
+    const paymentIsBypassed =
+      process.env.NODE_ENV !== 'production' && body.testBypassPayment === true
+    const initialOrderStatus = paymentIsBypassed
+      ? 'awaiting_restaurant'
+      : 'pending_payment'
 
     const createdOrder = await database.transaction(async (tx) => {
       const [order] = await tx
@@ -699,7 +706,7 @@ export async function customerRoutes(app: FastifyInstance) {
           ...(deliveryAddress.landmark
             ? { deliveryLandmark: deliveryAddress.landmark }
             : {}),
-          status: 'pending_payment',
+          status: initialOrderStatus,
           subtotalAmount,
           deliveryFeeAmount,
           serviceChargeAmount,
@@ -749,7 +756,13 @@ export async function customerRoutes(app: FastifyInstance) {
         method: body.paymentMethod,
         provider: body.paymentMethod === 'card' ? 'routepay' : null,
         amount: totalAmount,
-        status: 'pending',
+        status: paymentIsBypassed ? 'verified' : 'pending',
+        ...(paymentIsBypassed
+          ? {
+              paidAt: new Date(),
+              verifiedAt: new Date(),
+            }
+          : {}),
       })
 
       await tx.insert(deliveries).values({
@@ -804,9 +817,11 @@ export async function customerRoutes(app: FastifyInstance) {
 
       await tx.insert(orderStatusEvents).values({
         orderId: order.id,
-        status: 'pending_payment',
+        status: initialOrderStatus,
         actorUserId: sessionContext.userId,
-        note: 'Order created and awaiting payment.',
+        note: paymentIsBypassed
+          ? 'Order created with test payment bypass and sent to restaurant.'
+          : 'Order created and awaiting payment.',
       })
 
       await tx.insert(notifications).values({
@@ -816,6 +831,32 @@ export async function customerRoutes(app: FastifyInstance) {
         body: `Order ${order.orderNumber} has been created and is awaiting payment confirmation.`,
         data: { orderId: order.id, orderNumber: order.orderNumber },
       })
+
+      if (paymentIsBypassed) {
+        const restaurantUsers = await tx
+          .select({
+            userId: restaurantMembers.userId,
+          })
+          .from(restaurantMembers)
+          .where(
+            and(
+              eq(restaurantMembers.restaurantId, restaurantId),
+              eq(restaurantMembers.status, 'active'),
+            ),
+          )
+
+        if (restaurantUsers.length > 0) {
+          await tx.insert(notifications).values(
+            restaurantUsers.map((member) => ({
+              userId: member.userId,
+              type: 'restaurant_new_order',
+              title: 'New order awaiting decision',
+              body: `Order ${order.orderNumber} is ready for restaurant review.`,
+              data: { orderId: order.id, orderNumber: order.orderNumber },
+            })),
+          )
+        }
+      }
 
       return order
     })

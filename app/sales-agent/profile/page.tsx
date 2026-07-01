@@ -148,10 +148,6 @@ export default function SalesAgentProfile() {
                 <InfoBlock label="Agent code" value={profile?.salesAgent.agentCode ?? "Not assigned"} />
                 <InfoBlock label="Tier" value={profile?.salesAgent.tier ?? "standard"} />
                 <InfoBlock
-                  label="Commission rate"
-                  value={`${((profile?.salesAgent.commissionRateBps ?? 0) / 100).toFixed(1)}%`}
-                />
-                <InfoBlock
                   label="Payout method"
                   value={
                     profile?.payoutAccount

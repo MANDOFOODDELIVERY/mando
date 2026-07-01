@@ -5,9 +5,10 @@ import {
   SearchIcon,
 } from "@/components/svgs/DefaultIcons";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import RestaurantCard from "@/components/cards/RestaurantCard";
 import BottomNav from "@/components/BottomNav";
+import CustomerSearchDropdown from "@/components/CustomerSearchDropdown";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
@@ -45,6 +46,7 @@ const SuggestedRestaurant = () => {
   const [hasNearbyLocation, setHasNearbyLocation] = useState(false);
   const [restaurantsLoading, setRestaurantsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -103,6 +105,33 @@ const SuggestedRestaurant = () => {
     };
   }, [searchQuery]);
 
+  useEffect(() => {
+    const storedSearches = localStorage.getItem("mando_recent_searches");
+    if (storedSearches) setRecentSearches(JSON.parse(storedSearches) as string[]);
+  }, []);
+
+  const searchResults = useMemo(
+    () =>
+      restaurants
+        .filter((restaurant) => {
+          const query = searchQuery.trim().toLowerCase();
+          if (!query) return true;
+          return `${restaurant.name} ${restaurant.description ?? ""} ${restaurant.serviceArea.name}`
+            .toLowerCase()
+            .includes(query);
+        })
+        .map((restaurant) => ({
+          label: restaurant.name,
+          href: `/customer/restaurants/${restaurant.slug}`,
+          meta: `${restaurant.description ?? "Restaurant"} - ${restaurant.serviceArea.name}`,
+        })),
+    [restaurants, searchQuery],
+  );
+
+  function chooseRecentSearch(value: string) {
+    setSearchQuery(value);
+  }
+
   return (
     <div className="p-6 pb-28">
       <header className="flex items-center mb-6">
@@ -117,14 +146,34 @@ const SuggestedRestaurant = () => {
         </Link>
       </header>
 
-      <div className="flex items-center space-x-3 rounded-md border border-[#cccccc] p-3 w-full mb-4">
-        <SearchIcon />
-        <input
-          type="text"
-          placeholder="Search for restaurants..."
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          className="placeholder:text-[#A4A4A4] text-[14px] focus:outline-none w-full"
+      <div className="relative mb-4">
+        <div className="flex items-center space-x-3 rounded-md border border-[#cccccc] p-3 w-full">
+          <SearchIcon />
+          <input
+            type="text"
+            placeholder="Search for restaurants..."
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && searchQuery.trim()) {
+                const nextSearches = Array.from(new Set([searchQuery.trim(), ...recentSearches])).slice(0, 6);
+                setRecentSearches(nextSearches);
+                localStorage.setItem("mando_recent_searches", JSON.stringify(nextSearches));
+              }
+            }}
+            className="placeholder:text-[#A4A4A4] text-[14px] focus:outline-none w-full"
+          />
+        </div>
+        <CustomerSearchDropdown
+          query={searchQuery}
+          results={searchResults}
+          recentSearches={recentSearches}
+          onRecentSearch={chooseRecentSearch}
+          filters={[
+            { label: "Nearby", href: "/customer/restaurants?filter=nearby" },
+            { label: "Top rated", href: "/customer/restaurants?filter=top-rated" },
+            { label: "Combos", href: `/customer/featured-combos?q=${encodeURIComponent(searchQuery)}` },
+          ]}
         />
       </div>
 

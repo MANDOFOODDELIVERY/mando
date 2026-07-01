@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
+import { FiBell, FiLogOut, FiRefreshCw } from "react-icons/fi";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import RestaurantBottomNav from "@/components/RestaurantBottomNav";
 import { MoneyIcon, TimerIcon } from "@/components/svgs/DefaultIcons";
@@ -145,14 +147,35 @@ export default function RestaurantDashboard() {
               {area ? `${area.name}, ${area.city}` : "Checking service area"}
             </p>
           </div>
-          <button
-            type="button"
-            disabled={loggingOut}
-            className="rounded-2xl bg-[#E53E3E] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-            onClick={() => setShowLogoutConfirmation(true)}
-          >
-            {loggingOut ? "Logging out..." : "Logout"}
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/restaurant/notifications"
+              aria-label="Notifications"
+              title="Notifications"
+              className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-[#141B34] shadow-sm ring-1 ring-gray-200"
+            >
+              <FiBell className="h-5 w-5" />
+            </Link>
+            <button
+              type="button"
+              aria-label="Refresh restaurant dashboard"
+              title="Refresh"
+              disabled={loading}
+              className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[#141B34] text-white disabled:opacity-60"
+              onClick={() => void loadDashboard()}
+            >
+              <FiRefreshCw className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              disabled={loggingOut}
+              className="inline-flex items-center gap-2 rounded-2xl bg-[#E53E3E] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+              onClick={() => setShowLogoutConfirmation(true)}
+            >
+              <FiLogOut className="h-4 w-4" />
+              {loggingOut ? "Logging out..." : "Logout"}
+            </button>
+          </div>
         </header>
 
         <section className="mb-6 grid gap-4 sm:grid-cols-2">

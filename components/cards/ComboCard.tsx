@@ -14,7 +14,7 @@ const ComboCard = ({
   title = "Amala + Ewedu soup",
   price = "N2,800",
   vendor = "Mama Chef Cafe",
-  rating = "4.5(65k)",
+  rating,
   imgUrl = "/dummy-img.jpg",
   href,
 }: ComboCardProps) => {
@@ -27,7 +27,7 @@ const ComboCard = ({
         <div className="bg-black/50 text-white h-[194px] rounded-lg p-3 flex flex-col justify-between">
           <div className="flex justify-end items-center space-x-1">
             <StarIcon />
-            <p className="text-[14px]">{rating}</p>
+            {rating ? <p className="text-[14px]">{rating}</p> : null}
           </div>
 
           <div className="flex justify-end">

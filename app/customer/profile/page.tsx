@@ -630,6 +630,25 @@ export default function ProfilePage() {
         </section>
 
         <section className="mb-6">
+          <div className="rounded-[28px] border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-base font-semibold text-[#141B34]">Order history</h3>
+                <p className="mt-1 text-sm text-[#6B6B6B]">
+                  Track orders and leave ratings.
+                </p>
+              </div>
+              <Link
+                href="/customer/orders"
+                className="rounded-2xl bg-[#141B34] px-5 py-3 text-center text-sm font-semibold text-white"
+              >
+                View order history
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        <section className="mb-6 hidden">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-semibold text-[#141B34]">Recent orders</h3>
@@ -713,7 +732,7 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        <section className="mb-6">
+        <section className="mb-6 hidden">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-semibold text-[#141B34]">Saved addresses</h3>

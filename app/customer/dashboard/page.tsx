@@ -1,11 +1,12 @@
 "use client";
 
 import ComboCard from "@/components/cards/ComboCard";
+import CustomerSearchDropdown from "@/components/CustomerSearchDropdown";
 import BottomNav from "@/components/BottomNav";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LocationIcon,
   NotificationIcon,
@@ -51,6 +52,7 @@ const Dashboard = () => {
   const [combos, setCombos] = useState<ComboSummary[]>([]);
   const [combosLoading, setCombosLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -116,6 +118,27 @@ const Dashboard = () => {
     };
   }, [setNotifications]);
 
+  useEffect(() => {
+    const storedSearches = localStorage.getItem("mando_recent_searches");
+    if (storedSearches) setRecentSearches(JSON.parse(storedSearches) as string[]);
+  }, []);
+
+  const comboSearchResults = useMemo(
+    () =>
+      combos
+        .filter((combo) => {
+          const query = searchQuery.trim().toLowerCase();
+          if (!query) return true;
+          return `${combo.name} ${combo.restaurant.name}`.toLowerCase().includes(query);
+        })
+        .map((combo) => ({
+          label: combo.name,
+          href: `/customer/featured-combos/${combo.id}`,
+          meta: combo.restaurant.name,
+        })),
+    [combos, searchQuery],
+  );
+
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -123,6 +146,9 @@ const Dashboard = () => {
 
     if (!query) return;
 
+    const nextSearches = Array.from(new Set([query, ...recentSearches])).slice(0, 6);
+    setRecentSearches(nextSearches);
+    localStorage.setItem("mando_recent_searches", JSON.stringify(nextSearches));
     router.push(`/customer/featured-combos?q=${encodeURIComponent(query)}`);
   }
 
@@ -157,16 +183,29 @@ const Dashboard = () => {
         <span className="text-[#A4A4A4]">right to your door</span>{" "}
       </h2>
 
-      <form onSubmit={submitSearch} className="flex items-center space-x-3 rounded-md border border-[#cccccc] p-3 w-full">
-        <SearchIcon />
-        <input
-          type="text"
-          placeholder="Search for combos..."
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          className="placeholder:text-[#A4A4A4] text-[14px] focus:outline-none"
+      <div className="relative">
+        <form onSubmit={submitSearch} className="flex items-center space-x-3 rounded-md border border-[#cccccc] p-3 w-full">
+          <SearchIcon />
+          <input
+            type="text"
+            placeholder="Search for combos..."
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            className="w-full placeholder:text-[#A4A4A4] text-[14px] focus:outline-none"
+          />
+        </form>
+        <CustomerSearchDropdown
+          query={searchQuery}
+          results={comboSearchResults}
+          recentSearches={recentSearches}
+          onRecentSearch={setSearchQuery}
+          filters={[
+            { label: "Combos", href: `/customer/featured-combos?q=${encodeURIComponent(searchQuery)}` },
+            { label: "Restaurants", href: `/customer/restaurants?q=${encodeURIComponent(searchQuery)}` },
+            { label: "Nearby", href: "/customer/restaurants?filter=nearby" },
+          ]}
         />
-      </form>
+      </div>
 
       <div className="mt-10">
         <img src="/ad.png" className="w-full" alt="promo-banner" />

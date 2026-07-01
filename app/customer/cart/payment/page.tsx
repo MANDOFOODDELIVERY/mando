@@ -26,9 +26,9 @@ type CreateOrderResponse = {
   };
 };
 
-type RoutePayInitiateResponse = {
+type PaymentInitiateResponse = {
   payment: {
-    provider: "routepay";
+    provider: string;
     redirectUrl: string;
     transactionReference: string | null;
     merchantReference: string;
@@ -168,7 +168,7 @@ export default function PaymentPage() {
     setStartingCheckout(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/customer/payments/routepay/initiate`, {
+      const response = await fetch(`${API_BASE_URL}/customer/payments/checkout/initiate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -180,19 +180,19 @@ export default function PaymentPage() {
       });
 
       const data = (await response.json().catch(() => null)) as
-        | RoutePayInitiateResponse
+        | PaymentInitiateResponse
         | { message?: string }
         | null;
 
       if (!response.ok || !data || !("payment" in data)) {
-        throw new Error(getResponseMessage(data) ?? "Unable to start RoutePay checkout");
+        throw new Error(getResponseMessage(data) ?? "Unable to start checkout");
       }
 
-      showToast("Redirecting to RoutePay checkout", "success");
+      showToast("Opening secure payment checkout", "success");
       window.location.assign(data.payment.redirectUrl);
     } catch (error) {
       showToast(
-        error instanceof Error ? error.message : "Unable to start RoutePay checkout",
+        error instanceof Error ? error.message : "Unable to start checkout",
         "error",
       );
       setStartingCheckout(false);
@@ -222,13 +222,13 @@ export default function PaymentPage() {
         <div className="rounded-3xl bg-white p-6 shadow-sm border border-gray-200 space-y-6">
           <div>
             <p className="text-sm text-[#A4A4A4]">Payment method</p>
-            <h1 className="text-[24px] font-semibold mt-2">RoutePay checkout</h1>
+            <h1 className="text-[24px] font-semibold mt-2">Secure checkout</h1>
           </div>
 
           <div className="space-y-4 text-[#6B6B6B]">
             <p>
-              We&apos;ll create your order, then send you to RoutePay&apos;s hosted
-              checkout page to complete payment securely.
+              We&apos;ll create your order, then send you to the secure checkout page
+              to complete payment.
             </p>
             <div className="rounded-2xl border border-gray-200 bg-[#FAFAFA] p-4">
               <p className="text-xs uppercase tracking-[0.15em] text-[#A4A4A4]">Amount</p>
@@ -247,7 +247,7 @@ export default function PaymentPage() {
           onClick={confirmPayment}
           className="w-full rounded-xl bg-[#DFB400] py-4 text-[16px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {creatingOrder || startingCheckout ? "Starting checkout..." : "Pay with RoutePay"}
+          {creatingOrder || startingCheckout ? "Starting checkout..." : "Proceed to payment"}
         </button>
       </div>
     </div>

@@ -29,6 +29,10 @@ const loginBodySchema = z.object({
   password: z.string().min(1),
 })
 
+const notificationParamsSchema = z.object({
+  notificationId: z.uuid(),
+})
+
 export async function salesAgentRoutes(app: FastifyInstance) {
   app.post('/login', async (request, reply) => {
     const parsedBody = loginBodySchema.safeParse(request.body)
@@ -218,6 +222,43 @@ export async function salesAgentRoutes(app: FastifyInstance) {
         message: 'Unable to load shareable combos.',
       })
     }
+  })
+
+  app.get('/notifications', async (request, reply) => {
+    const auth = await requireSalesAgent(request.headers.cookie, reply)
+    if (!auth) return
+
+    return reply.status(200).send({
+      notifications: await getUserNotifications(auth.userId),
+    })
+  })
+
+  app.patch('/notifications/:notificationId/read', async (request, reply) => {
+    const auth = await requireSalesAgent(request.headers.cookie, reply)
+    if (!auth) return
+
+    const params = notificationParamsSchema.safeParse(request.params)
+    if (!params.success) return sendInvalidNotification(reply)
+
+    const notification = await markUserNotificationRead(
+      auth.userId,
+      params.data.notificationId,
+    )
+
+    if (!notification) return sendNotificationNotFound(reply)
+    return reply.status(200).send({ notification })
+  })
+
+  app.post('/notifications/read-all', async (request, reply) => {
+    const auth = await requireSalesAgent(request.headers.cookie, reply)
+    if (!auth) return
+
+    await database
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(eq(notifications.userId, auth.userId))
+
+    return reply.status(204).send()
   })
 }
 
@@ -421,6 +462,50 @@ async function getShareableCombos(agentUserId: string) {
 function buildWebUrl(path: string) {
   const origin = process.env.WEB_ORIGIN?.split(',')[0] ?? 'http://localhost:3000'
   return `${origin}${path}`
+}
+
+function getUserNotifications(userId: string) {
+  return database
+    .select({
+      id: notifications.id,
+      type: notifications.type,
+      title: notifications.title,
+      body: notifications.body,
+      data: notifications.data,
+      readAt: notifications.readAt,
+      createdAt: notifications.createdAt,
+    })
+    .from(notifications)
+    .where(eq(notifications.userId, userId))
+    .orderBy(desc(notifications.createdAt))
+    .limit(50)
+}
+
+async function markUserNotificationRead(userId: string, notificationId: string) {
+  const [notification] = await database
+    .update(notifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    .returning({
+      id: notifications.id,
+      readAt: notifications.readAt,
+    })
+
+  return notification ?? null
+}
+
+function sendInvalidNotification(reply: FastifyReply) {
+  return reply.status(400).send({
+    error: 'validation_error',
+    message: 'Please choose a valid notification.',
+  })
+}
+
+function sendNotificationNotFound(reply: FastifyReply) {
+  return reply.status(404).send({
+    error: 'notification_not_found',
+    message: 'Notification not found.',
+  })
 }
 
 function sendSalesAgentNotFound(reply: FastifyReply) {

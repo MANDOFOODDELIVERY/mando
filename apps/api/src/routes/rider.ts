@@ -19,6 +19,7 @@ import {
   orderStatusEvents,
   orders,
   payoutAccounts,
+  payoutRequests,
   profiles,
   restaurantEarnings,
   restaurants,
@@ -40,6 +41,10 @@ const riderLoginBodySchema = z.object({
 
 const orderParamsSchema = z.object({
   orderId: z.uuid(),
+})
+
+const notificationParamsSchema = z.object({
+  notificationId: z.uuid(),
 })
 
 type DeliveryRow = {
@@ -150,6 +155,7 @@ export async function riderRoutes(app: FastifyInstance) {
 
       const [payoutAccount] = await database
         .select({
+          id: payoutAccounts.id,
           accountName: payoutAccounts.accountName,
           accountNumberLast4: payoutAccounts.accountNumberLast4,
           isVerified: payoutAccounts.isVerified,
@@ -161,6 +167,10 @@ export async function riderRoutes(app: FastifyInstance) {
       return reply.status(200).send({
         ...rider,
         payoutAccount: payoutAccount ?? null,
+        payout: {
+          availableAmount: await getAvailableRiderPayoutAmount(auth.userId),
+        },
+        payoutRequests: await getRiderPayoutRequests(auth.userId),
       })
     } catch (error) {
       request.log.error(error)
@@ -308,6 +318,91 @@ export async function riderRoutes(app: FastifyInstance) {
         message: 'Unable to load delivery history.',
       })
     }
+  })
+
+  app.post('/payout-requests', async (request, reply) => {
+    const auth = await requireRider(request.headers.cookie, reply)
+    if (!auth) return
+
+    const [payoutAccount] = await database
+      .select({ id: payoutAccounts.id })
+      .from(payoutAccounts)
+      .where(eq(payoutAccounts.userId, auth.userId))
+      .limit(1)
+
+    if (!payoutAccount) {
+      return reply.status(409).send({
+        error: 'missing_payout_account',
+        message: 'Admin needs to add your payout account before you can request payout.',
+      })
+    }
+
+    const amount = await getAvailableRiderPayoutAmount(auth.userId)
+
+    if (amount <= 0) {
+      return reply.status(409).send({
+        error: 'no_available_payout',
+        message: 'There are no available rider earnings to request.',
+      })
+    }
+
+    const [payoutRequest] = await database
+      .insert(payoutRequests)
+      .values({
+        requestedByUserId: auth.userId,
+        userId: auth.userId,
+        type: 'rider_earnings',
+        payoutAccountId: payoutAccount.id,
+        amount,
+      })
+      .returning()
+
+    await database.insert(notifications).values({
+      userId: auth.userId,
+      type: 'rider_payout_requested',
+      title: 'Payout request sent',
+      body: `Your ${formatMoney(amount)} rider payout request has been sent to admin.`,
+      data: { payoutRequestId: payoutRequest.id, amount },
+    })
+
+    return reply.status(201).send({ payoutRequest })
+  })
+
+  app.get('/notifications', async (request, reply) => {
+    const auth = await requireRider(request.headers.cookie, reply)
+    if (!auth) return
+
+    return reply.status(200).send({
+      notifications: await getUserNotifications(auth.userId),
+    })
+  })
+
+  app.patch('/notifications/:notificationId/read', async (request, reply) => {
+    const auth = await requireRider(request.headers.cookie, reply)
+    if (!auth) return
+
+    const params = notificationParamsSchema.safeParse(request.params)
+    if (!params.success) return sendInvalidNotification(reply)
+
+    const notification = await markUserNotificationRead(
+      auth.userId,
+      params.data.notificationId,
+    )
+
+    if (!notification) return sendNotificationNotFound(reply)
+    return reply.status(200).send({ notification })
+  })
+
+  app.post('/notifications/read-all', async (request, reply) => {
+    const auth = await requireRider(request.headers.cookie, reply)
+    if (!auth) return
+
+    await database
+      .update(notifications)
+      .set({ readAt: new Date() })
+      .where(eq(notifications.userId, auth.userId))
+
+    return reply.status(204).send()
   })
 }
 
@@ -464,6 +559,30 @@ async function updateDeliveryAssignment(
         })
         .where(eq(commissions.orderId, target.orderId))
 
+      const earnedCommissions = await tx
+        .select({
+          salesAgentId: commissions.salesAgentId,
+          commissionAmount: commissions.commissionAmount,
+        })
+        .from(commissions)
+        .where(eq(commissions.orderId, target.orderId))
+
+      if (earnedCommissions.length > 0) {
+        await tx.insert(notifications).values(
+          earnedCommissions.map((commission) => ({
+            userId: commission.salesAgentId,
+            type: 'commission_earned',
+            title: 'Commission earned',
+            body: `${formatMoney(commission.commissionAmount)} commission from order ${target.orderNumber} is now earned.`,
+            data: {
+              orderId: target.orderId,
+              orderNumber: target.orderNumber,
+              amount: commission.commissionAmount,
+            },
+          })),
+        )
+      }
+
       await tx
         .update(restaurantEarnings)
         .set({
@@ -481,6 +600,22 @@ async function updateDeliveryAssignment(
         data: {
           orderId: target.orderId,
           orderNumber: target.orderNumber,
+        },
+      })
+    }
+
+    if (options.action === 'picked_up') {
+      await tx.insert(notifications).values({
+        userId: target.customerId,
+        type: 'order_picked_up',
+        title: 'Your order has been picked up',
+        body: `${rider.profile.fullName} is on the way with order ${target.orderNumber}.${rider.profile.phone ? ` Contact: ${rider.profile.phone}` : ''}`,
+        data: {
+          orderId: target.orderId,
+          orderNumber: target.orderNumber,
+          riderId: auth.userId,
+          riderName: rider.profile.fullName,
+          riderPhone: rider.profile.phone,
         },
       })
     }
@@ -509,6 +644,50 @@ async function requireRider(cookieHeader: string | undefined, reply: FastifyRepl
   }
 
   return sessionContext
+}
+
+function getUserNotifications(userId: string) {
+  return database
+    .select({
+      id: notifications.id,
+      type: notifications.type,
+      title: notifications.title,
+      body: notifications.body,
+      data: notifications.data,
+      readAt: notifications.readAt,
+      createdAt: notifications.createdAt,
+    })
+    .from(notifications)
+    .where(eq(notifications.userId, userId))
+    .orderBy(desc(notifications.createdAt))
+    .limit(50)
+}
+
+async function markUserNotificationRead(userId: string, notificationId: string) {
+  const [notification] = await database
+    .update(notifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(notifications.id, notificationId), eq(notifications.userId, userId)))
+    .returning({
+      id: notifications.id,
+      readAt: notifications.readAt,
+    })
+
+  return notification ?? null
+}
+
+function sendInvalidNotification(reply: FastifyReply) {
+  return reply.status(400).send({
+    error: 'validation_error',
+    message: 'Please choose a valid notification.',
+  })
+}
+
+function sendNotificationNotFound(reply: FastifyReply) {
+  return reply.status(404).send({
+    error: 'notification_not_found',
+    message: 'Notification not found.',
+  })
 }
 
 async function getRiderProfile(userId: string) {
@@ -680,6 +859,68 @@ function getDeliveryEventNote(action: 'accept' | 'picked_up' | 'delivered') {
   if (action === 'accept') return 'Rider accepted the delivery.'
   if (action === 'picked_up') return 'Rider picked up the order.'
   return 'Rider delivered the order.'
+}
+
+async function getAvailableRiderPayoutAmount(userId: string) {
+  const deliveredRows = await database
+    .select({ riderEarningAmount: deliveries.riderEarningAmount })
+    .from(deliveries)
+    .where(and(eq(deliveries.riderId, userId), eq(deliveries.status, 'delivered')))
+
+  const requestedRows = await database
+    .select({ amount: payoutRequests.amount })
+    .from(payoutRequests)
+    .where(
+      and(
+        eq(payoutRequests.userId, userId),
+        eq(payoutRequests.type, 'rider_earnings'),
+        inArray(payoutRequests.status, [
+          'pending',
+          'under_review',
+          'approved',
+          'processing',
+          'paid',
+        ]),
+      ),
+    )
+
+  const deliveredAmount = deliveredRows.reduce(
+    (total, row) => total + row.riderEarningAmount,
+    0,
+  )
+  const requestedAmount = requestedRows.reduce(
+    (total, row) => total + row.amount,
+    0,
+  )
+
+  return Math.max(deliveredAmount - requestedAmount, 0)
+}
+
+function getRiderPayoutRequests(userId: string) {
+  return database
+    .select({
+      id: payoutRequests.id,
+      amount: payoutRequests.amount,
+      status: payoutRequests.status,
+      requestedAt: payoutRequests.requestedAt,
+    })
+    .from(payoutRequests)
+    .where(
+      and(
+        eq(payoutRequests.userId, userId),
+        eq(payoutRequests.type, 'rider_earnings'),
+      ),
+    )
+    .orderBy(desc(payoutRequests.requestedAt))
+    .limit(10)
+}
+
+function formatMoney(amount: number) {
+  return new Intl.NumberFormat('en-NG', {
+    style: 'currency',
+    currency: 'NGN',
+    maximumFractionDigits: 0,
+  }).format(amount)
 }
 
 function getOrderEventNote(action: 'accept' | 'picked_up' | 'delivered') {

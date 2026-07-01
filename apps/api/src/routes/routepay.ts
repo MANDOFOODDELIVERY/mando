@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { and, eq } from 'drizzle-orm'
 import { z } from 'zod'
 
@@ -20,7 +20,14 @@ const initiateBodySchema = z.object({
 })
 
 export async function routePayRoutes(app: FastifyInstance) {
-  app.post('/payments/routepay/initiate', async (request, reply) => {
+  app.post('/payments/checkout/initiate', initiateHostedCheckout)
+  app.post('/payments/routepay/initiate', initiateHostedCheckout)
+}
+
+async function initiateHostedCheckout(
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
     const sessionContext = await getCurrentSessionContext(request.headers.cookie)
 
     if (!sessionContext) {
@@ -114,7 +121,6 @@ export async function routePayRoutes(app: FastifyInstance) {
             : 'Unable to start RoutePay payment.',
       })
     }
-  })
 }
 
 async function getPendingCustomerOrder(customerId: string, orderId: string) {

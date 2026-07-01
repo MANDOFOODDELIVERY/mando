@@ -1,4 +1,5 @@
 import create from "zustand";
+import { persist } from "zustand/middleware";
 
 export type CartItem = {
   id: string;
@@ -41,37 +42,50 @@ type CartState = {
   total: () => number;
 };
 
-export const useCartStore = create<CartState>((set, get) => ({
-  items: [],
-  checkoutOrder: null,
-  deliveryAddress: "Add delivery address",
-  phoneNumber: "",
-  addItem: (item) =>
-    set((state) => {
-      const exists = state.items.find((i) => i.id === item.id);
-      if (exists) {
-        return {
-          items: state.items.map((i) =>
-            i.id === item.id
-              ? {
-                  ...i,
-                  ...item,
-                  quantity: item.quantity || i.quantity,
-                }
-              : i,
-          ),
-        };
-      }
-      return { items: [...state.items, item] };
+export const useCartStore = create<CartState>()(
+  persist(
+    (set, get) => ({
+      items: [],
+      checkoutOrder: null,
+      deliveryAddress: "Add delivery address",
+      phoneNumber: "",
+      addItem: (item) =>
+        set((state) => {
+          const exists = state.items.find((i) => i.id === item.id);
+          if (exists) {
+            return {
+              items: state.items.map((i) =>
+                i.id === item.id
+                  ? {
+                      ...i,
+                      ...item,
+                      quantity: item.quantity || i.quantity,
+                    }
+                  : i,
+              ),
+            };
+          }
+          return { items: [...state.items, item] };
+        }),
+      removeItem: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
+      updateQuantity: (id, quantity) =>
+        set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, quantity } : i)) })),
+      setCheckoutOrder: (order) => set({ checkoutOrder: order }),
+      clear: () => set({ items: [], checkoutOrder: null }),
+      setDeliveryAddress: (address) => set({ deliveryAddress: address }),
+      setPhoneNumber: (phone) => set({ phoneNumber: phone }),
+      total: () => get().items.reduce((sum, i) => sum + i.price * i.quantity, 0),
     }),
-  removeItem: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
-  updateQuantity: (id, quantity) =>
-    set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, quantity } : i)) })),
-  setCheckoutOrder: (order) => set({ checkoutOrder: order }),
-  clear: () => set({ items: [], checkoutOrder: null }),
-  setDeliveryAddress: (address) => set({ deliveryAddress: address }),
-  setPhoneNumber: (phone) => set({ phoneNumber: phone }),
-  total: () => get().items.reduce((sum, i) => sum + i.price * i.quantity, 0),
-}));
+    {
+      name: "mando-cart",
+      partialize: (state) => ({
+        items: state.items,
+        checkoutOrder: state.checkoutOrder,
+        deliveryAddress: state.deliveryAddress,
+        phoneNumber: state.phoneNumber,
+      }),
+    },
+  ),
+);
 
 export default useCartStore;

@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { FiRefreshCw } from "react-icons/fi";
+import { FiBell, FiLogOut, FiRefreshCw } from "react-icons/fi";
 import ConfirmationModal from "@/components/ConfirmationModal";
 import RiderBottomNav from "@/components/RiderBottomNav";
 import { MoneyIcon, TimerIcon } from "@/components/svgs/DefaultIcons";
@@ -200,13 +201,22 @@ export default function RiderDashboard() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href="/rider/notifications"
+              aria-label="Notifications"
+              title="Notifications"
+              className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-[#141B34] shadow-sm ring-1 ring-gray-200"
+            >
+              <FiBell className="h-5 w-5" />
+            </Link>
             {dashboard ? (
               <button
                 type="button"
                 disabled={loggingOut}
-                className="rounded-2xl bg-[#E53E3E] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                className="inline-flex items-center gap-2 rounded-2xl bg-[#E53E3E] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
                 onClick={() => setShowLogoutConfirmation(true)}
               >
+                <FiLogOut className="h-4 w-4" />
                 {loggingOut ? "Logging out..." : "Logout"}
               </button>
             ) : (
@@ -249,7 +259,14 @@ export default function RiderDashboard() {
                 <p className="mt-2 text-lg font-semibold text-[#141B34]">
                   {area ? area.name : "Loading..."}
                 </p>
-                <p className="mt-1 text-sm font-semibold capitalize text-[#6B6B6B]">
+                <p className="mt-1 inline-flex items-center gap-2 text-sm font-semibold capitalize text-[#6B6B6B]">
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      dashboard?.rider.rider.availabilityStatus === "available"
+                        ? "bg-green-500"
+                        : "bg-red-500"
+                    }`}
+                  />
                   {dashboard?.rider.rider.availabilityStatus ?? "checking"}
                 </p>
               </div>
