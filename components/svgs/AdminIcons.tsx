@@ -8,28 +8,28 @@ export const OverviewIcon = () => (
   >
     <path
       d="M5.625 1.875H2.5C2.15482 1.875 1.875 2.15482 1.875 2.5V6.875C1.875 7.22018 2.15482 7.5 2.5 7.5H5.625C5.97018 7.5 6.25 7.22018 6.25 6.875V2.5C6.25 2.15482 5.97018 1.875 5.625 1.875Z"
-      stroke="white"
+      stroke="currentColor"
       strokeWidth="1.25"
       strokeLinecap="round"
       strokeLinejoin="round"
     />
     <path
       d="M12.5 1.875H9.375C9.02982 1.875 8.75 2.15482 8.75 2.5V4.375C8.75 4.72018 9.02982 5 9.375 5H12.5C12.8452 5 13.125 4.72018 13.125 4.375V2.5C13.125 2.15482 12.8452 1.875 12.5 1.875Z"
-      stroke="white"
+      stroke="currentColor"
       strokeWidth="1.25"
       strokeLinecap="round"
       strokeLinejoin="round"
     />
     <path
       d="M12.5 7.5H9.375C9.02982 7.5 8.75 7.77982 8.75 8.125V12.5C8.75 12.8452 9.02982 13.125 9.375 13.125H12.5C12.8452 13.125 13.125 12.8452 13.125 12.5V8.125C13.125 7.77982 12.8452 7.5 12.5 7.5Z"
-      stroke="white"
+      stroke="currentColor"
       strokeWidth="1.25"
       strokeLinecap="round"
       strokeLinejoin="round"
     />
     <path
       d="M5.625 10H2.5C2.15482 10 1.875 10.2798 1.875 10.625V12.5C1.875 12.8452 2.15482 13.125 2.5 13.125H5.625C5.97018 13.125 6.25 12.8452 6.25 12.5V10.625C6.25 10.2798 5.97018 10 5.625 10Z"
-      stroke="white"
+      stroke="currentColor"
       strokeWidth="1.25"
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -194,7 +194,7 @@ export const FoodCombosIcon = () => (
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
   >
-    <g clip-path="url(#clip0_919_1992)">
+    <g clipPath="url(#clip0_919_1992)">
       <path
         d="M10.0001 1.25L8.56259 2.6875C8.21904 3.03799 8.02661 3.50921 8.02661 4C8.02661 4.49079 8.21904 4.96201 8.56259 5.3125L9.68759 6.4375C10.0381 6.78105 10.5093 6.97348 11.0001 6.97348C11.4909 6.97348 11.9621 6.78105 12.3126 6.4375L13.7501 5"
         stroke="currentColor"
@@ -421,7 +421,7 @@ export const SupportIcon = () => (
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
   >
-    <g clip-path="url(#clip0_919_2037)">
+    <g clipPath="url(#clip0_919_2037)">
       <path
         d="M7.5 13.75C10.9518 13.75 13.75 10.9518 13.75 7.5C13.75 4.04822 10.9518 1.25 7.5 1.25C4.04822 1.25 1.25 4.04822 1.25 7.5C1.25 10.9518 4.04822 13.75 7.5 13.75Z"
         stroke="currentColor"
@@ -484,3 +484,37 @@ export const LogoutIcon = () => (
   </svg>
 );
 
+export const RefreshIcon = () => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 12 12"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M1.5 6C1.5 4.80653 1.97411 3.66193 2.81802 2.81802C3.66193 1.97411 4.80653 1.5 6 1.5C7.25802 1.50473 8.46552 1.99561 9.37 2.87L10.5 4"
+      stroke="#6A7282"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M10.5 1.5V4H8"
+      stroke="#6A7282"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M10.5 6C10.5 7.19347 10.0259 8.33807 9.18198 9.18198C8.33807 10.0259 7.19347 10.5 6 10.5C4.74198 10.4953 3.53448 10.0044 2.63 9.13L1.5 8"
+      stroke="#6A7282"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M4 8H1.5V10.5"
+      stroke="#6A7282"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
