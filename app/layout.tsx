@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense } from "react";
 import "./globals.css";
+import RootContainer from "./RootContainer";
 import ServiceWorkerRegister from "../components/ServiceWorkerRegister";
 import SalesAttributionCapture from "@/components/SalesAttributionCapture";
 import ToastContainer from "@/components/ToastContainer";
@@ -37,9 +38,9 @@ export default function RootLayout({
         <meta name="theme-color" content="#ffffff" />
       </head>
       <body className="min-h-screen flex flex-col items-center justify-start">
-        <div className="w-full lg:max-w-[420px] min-h-screen mx-auto bg-white">
+        <RootContainer>
           {children}
-        </div>
+        </RootContainer>
         <ToastContainer />
         <Suspense fallback={null}>
           <SalesAttributionCapture />
