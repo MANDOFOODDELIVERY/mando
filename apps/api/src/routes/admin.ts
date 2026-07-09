@@ -37,6 +37,18 @@ const orderParamsSchema = z.object({
 })
 
 export async function adminRoutes(app: FastifyInstance) {
+  app.addHook('preHandler', async (request, reply) => {
+    if (
+      request.method === 'POST' &&
+      (request.url === '/login' || request.url === '/admin/login')
+    ) {
+      return
+    }
+
+    const auth = await requireAdmin(request.headers.cookie, reply)
+    if (!auth) return reply
+  })
+
   app.post('/login', async (request, reply) => {
     const parsedBody = loginBodySchema.safeParse(request.body)
 
@@ -241,13 +253,14 @@ async function requireAdmin(cookieHeader: string | undefined, reply: FastifyRepl
   const sessionContext = await getCurrentSessionContext(cookieHeader)
 
   if (!sessionContext) {
-    return reply
+    reply
       .status(401)
       .header('Set-Cookie', serializeClearSessionCookie())
       .send({
         error: 'unauthenticated',
         message: 'Please log in to continue.',
       })
+    return null
   }
 
   if (!sessionContext.authPayload.roles.includes('admin')) {
