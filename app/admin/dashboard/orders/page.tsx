@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { FaPhoneAlt } from "react-icons/fa";
 import StatsCard from "@/components/cards/StatsCard";
 import {
   CancelIcon,
@@ -20,10 +21,16 @@ type AdminOrder = {
   totalAmount: number;
   placedAt: string;
   customer: { name: string; phone: string | null };
-  restaurant: { name: string };
+  restaurant: { name: string; phone?: string | null };
   rider: { name: string; phone: string | null } | null;
   delivery: { streetAddress: string; serviceArea: string; status: string };
   payment: { method: string | null; status: string };
+  timeline?: {
+    id: string;
+    status: string;
+    note: string | null;
+    createdAt: string;
+  }[];
   items?: {
     id: string;
     name: string;
@@ -200,14 +207,54 @@ const AdminOrdersPage = () => {
               </button>
             </div>
 
+            <div className="mt-4 space-y-3">
+              <ContactRow
+                label="Customer"
+                name={selectedOrder.customer.name}
+                phone={selectedOrder.customer.phone}
+                color="bg-[#C27AFF]"
+              />
+              <ContactRow
+                label="Restaurant"
+                name={selectedOrder.restaurant.name}
+                phone={selectedOrder.restaurant.phone ?? null}
+                color="bg-[#DFB400]"
+              />
+              <ContactRow
+                label="Rider"
+                name={selectedOrder.rider?.name ?? "Unassigned"}
+                phone={selectedOrder.rider?.phone ?? null}
+                color="bg-[#51A2FF]"
+              />
+            </div>
+
             <div className="mt-4 space-y-3 text-[11px] text-[#4A5565]">
-              <InfoRow label="Customer" value={selectedOrder.customer.name} />
-              <InfoRow label="Phone" value={selectedOrder.customer.phone ?? "No phone"} />
-              <InfoRow label="Restaurant" value={selectedOrder.restaurant.name} />
-              <InfoRow label="Rider" value={selectedOrder.rider?.name ?? "Unassigned"} />
               <InfoRow label="Delivery" value={`${selectedOrder.delivery.streetAddress}, ${selectedOrder.delivery.serviceArea}`} />
               <InfoRow label="Payment" value={selectedOrder.payment.status.replace("_", " ")} />
               <InfoRow label="Status" value={selectedOrder.status.replaceAll("_", " ")} />
+            </div>
+
+            <div className="mt-5 border-t border-gray-200 pt-4">
+              <h3 className="text-xs font-semibold text-[#101828]">Order Timeline</h3>
+              <div className="mt-3 space-y-3">
+                {buildTimeline(selectedOrder).map((event, index, events) => (
+                  <div key={event.id} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <span className="h-2.5 w-2.5 rounded-full bg-[#FE9A00]" />
+                      {index < events.length - 1 ? (
+                        <span className="mt-1 h-full min-h-8 w-px bg-gray-200" />
+                      ) : null}
+                    </div>
+                    <div className="pb-1">
+                      <p className="text-[11px] font-semibold capitalize text-[#101828]">
+                        {event.status.replaceAll("_", " ")}
+                      </p>
+                      <p className="mt-1 text-[10px] text-[#99A1AF]">{formatDateTime(event.createdAt)}</p>
+                      {event.note ? <p className="mt-1 text-[10px] text-[#6A7282]">{event.note}</p> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="mt-5 border-t border-gray-200 pt-4">
@@ -270,12 +317,72 @@ function StatusPill({ label }: { label: string }) {
   );
 }
 
+function ContactRow({
+  label,
+  name,
+  phone,
+  color,
+}: {
+  label: string;
+  name: string;
+  phone: string | null | undefined;
+  color: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white ${color}`}>
+          {initials(name)}
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] uppercase text-[#99A1AF]">{label}</p>
+          <h3 className="truncate text-[11px] font-semibold text-[#101828]">{name}</h3>
+          <p className="mt-0.5 text-[10px] text-[#6A7282]">{phone ?? "No phone"}</p>
+        </div>
+      </div>
+
+      {phone ? (
+        <a
+          href={`tel:${phone}`}
+          aria-label={`Call ${name}`}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FE9A00] text-white transition hover:bg-[#E68700]"
+        >
+          <FaPhoneAlt className="text-[12px]" />
+        </a>
+      ) : (
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-200 text-[#99A1AF]">
+          <FaPhoneAlt className="text-[12px]" />
+        </span>
+      )}
+    </div>
+  );
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <p className="text-[10px] uppercase text-[#99A1AF]">{label}</p>
       <p className="mt-1 font-semibold text-[#101828]">{value}</p>
     </div>
+  );
+}
+
+function buildTimeline(order: AdminOrder) {
+  const events =
+    order.timeline && order.timeline.length
+      ? order.timeline
+      : [
+          {
+            id: `${order.id}-created`,
+            status: order.status,
+            note: "Order record created.",
+            createdAt: order.placedAt,
+          },
+        ];
+
+  return [...events].sort(
+    (first, second) =>
+      new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime(),
   );
 }
 

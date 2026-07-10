@@ -16,6 +16,7 @@ import {
   orderIssues,
   orderItemComponents,
   orderItems,
+  orderStatusEvents,
   orders,
   payments,
   profiles,
@@ -243,9 +244,12 @@ export async function adminRoutes(app: FastifyInstance) {
       })
     }
 
-    const items = await selectAdminOrderItems(order.id)
+    const [items, timeline] = await Promise.all([
+      selectAdminOrderItems(order.id),
+      selectAdminOrderTimeline(order.id),
+    ])
 
-    return reply.status(200).send({ order: { ...order, items } })
+    return reply.status(200).send({ order: { ...order, items, timeline } })
   })
 }
 
@@ -288,6 +292,7 @@ async function selectAdminOrders(limit: number, orderId?: string) {
       customerId: orders.customerId,
       restaurantId: orders.restaurantId,
       restaurantName: restaurants.name,
+      restaurantPhone: restaurants.phone,
       restaurantImageUrl: restaurants.imageUrl,
       placedAt: orders.placedAt,
       createdAt: orders.createdAt,
@@ -349,6 +354,7 @@ async function selectAdminOrders(limit: number, orderId?: string) {
       restaurant: {
         id: order.restaurantId,
         name: order.restaurantName,
+        phone: order.restaurantPhone,
         imageUrl: order.restaurantImageUrl,
       },
       rider: rider
@@ -371,6 +377,26 @@ async function selectAdminOrders(limit: number, orderId?: string) {
       },
     }
   })
+}
+
+async function selectAdminOrderTimeline(orderId: string) {
+  const eventRows = await database
+    .select({
+      id: orderStatusEvents.id,
+      status: orderStatusEvents.status,
+      note: orderStatusEvents.note,
+      createdAt: orderStatusEvents.createdAt,
+    })
+    .from(orderStatusEvents)
+    .where(eq(orderStatusEvents.orderId, orderId))
+    .orderBy(desc(orderStatusEvents.createdAt))
+
+  return eventRows.map((event) => ({
+    id: event.id,
+    status: event.status,
+    note: event.note,
+    createdAt: event.createdAt,
+  }))
 }
 
 async function selectAdminOrderItems(orderId: string) {
