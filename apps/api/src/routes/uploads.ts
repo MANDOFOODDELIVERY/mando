@@ -13,7 +13,9 @@ const uploadSignatureBodySchema = z.object({
     'customer_avatar',
     'restaurant_logo',
     'restaurant_cover',
+    'menu_item_image',
     'combo_image',
+    'vendor_document',
   ]),
 })
 

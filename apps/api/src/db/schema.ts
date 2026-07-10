@@ -196,6 +196,20 @@ export const payoutStatusEnum = pgEnum('payout_status', [
   'cancelled',
 ])
 
+export const vendorDocumentTypeEnum = pgEnum('vendor_document_type', [
+  'cac_certificate',
+  'food_handler_certificate',
+  'tax_identification',
+  'health_safety_permit',
+])
+
+export const vendorDocumentStatusEnum = pgEnum('vendor_document_status', [
+  'pending',
+  'uploaded',
+  'verified',
+  'rejected',
+])
+
 export const users = pgTable(
   'users',
   {
@@ -439,6 +453,50 @@ export const restaurantMembers = pgTable(
     }),
     index('restaurant_members_user_id_index').on(table.userId),
     index('restaurant_members_status_index').on(table.status),
+  ],
+)
+
+export const restaurantOperations = pgTable(
+  'restaurant_operations',
+  {
+    restaurantId: uuid('restaurant_id')
+      .primaryKey()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    openingTime: text('opening_time'),
+    closingTime: text('closing_time'),
+    openDays: text('open_days'),
+    deliveryRadius: text('delivery_radius'),
+    deliveryType: text('delivery_type'),
+    website: text('website'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+)
+
+export const vendorDocuments = pgTable(
+  'vendor_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    restaurantId: uuid('restaurant_id')
+      .notNull()
+      .references(() => restaurants.id, { onDelete: 'cascade' }),
+    type: vendorDocumentTypeEnum('type').notNull(),
+    name: text('name').notNull(),
+    fileUrl: text('file_url'),
+    documentNumber: text('document_number'),
+    status: vendorDocumentStatusEnum('status').notNull().default('pending'),
+    uploadedAt: timestampWithTimezone('uploaded_at'),
+    reviewedAt: timestampWithTimezone('reviewed_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('vendor_documents_restaurant_id_type_unique').on(
+      table.restaurantId,
+      table.type,
+    ),
+    index('vendor_documents_restaurant_id_index').on(table.restaurantId),
+    index('vendor_documents_status_index').on(table.status),
   ],
 )
 
@@ -916,6 +974,26 @@ export const payoutRequests = pgTable(
       'payout_requests_exactly_one_beneficiary_check',
       sql`(${table.userId} is not null and ${table.restaurantId} is null) or (${table.userId} is null and ${table.restaurantId} is not null)`,
     ),
+  ],
+)
+
+export const adminPayoutSettings = pgTable(
+  'admin_payout_settings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    settingsKey: text('settings_key').notNull().default('default'),
+    frequency: text('frequency').notNull().default('Weekly'),
+    payoutTime: text('payout_time').notNull().default('17:00'),
+    minimumWithdrawal: moneyAmount('minimum_withdrawal').notNull().default(5000),
+    autoProcess: boolean('auto_process').notNull().default(false),
+    autoDeductCommission: boolean('auto_deduct_commission')
+      .notNull()
+      .default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    uniqueIndex('admin_payout_settings_key_unique').on(table.settingsKey),
   ],
 )
 

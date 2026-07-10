@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FaBan,
   FaClock,
+  FaCloudUploadAlt,
   FaFileAlt,
   FaHistory,
+  FaImage,
   FaPlus,
   FaRegBuilding,
   FaStore,
@@ -14,6 +16,7 @@ import {
   FaWallet,
 } from "react-icons/fa";
 import StatsCard from "@/components/cards/StatsCard";
+import { useToastStore } from "@/store/toastStore";
 
 const API_BASE_URL =
   (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000").replace(/\/+$/, "");
@@ -45,12 +48,22 @@ type AdminVendor = {
   documents?: VendorDocument[];
   menu?: VendorMenuItem[];
   activity?: VendorActivity[];
+  operations?: {
+    openingTime: string | null;
+    closingTime: string | null;
+    openDays: string | null;
+    deliveryRadius: string | null;
+    deliveryType: string | null;
+    website: string | null;
+  } | null;
 };
 
 type VendorDocument = {
   id: string;
   name: string;
   status: string;
+  documentNumber?: string | null;
+  fileUrl?: string | null;
 };
 
 type VendorMenuItem = {
@@ -80,26 +93,58 @@ type VendorsResponse = {
   vendors: AdminVendor[];
 };
 
+type CloudinaryUploadType = "restaurant_logo" | "menu_item_image" | "vendor_document";
+
+type CloudinarySignatureResponse = {
+  upload: {
+    apiKey: string;
+    uploadUrl: string;
+    folder: string;
+    publicId: string;
+    timestamp: number;
+    signature: string;
+  };
+};
+
+type CloudinaryUploadResponse = {
+  secure_url: string;
+};
+
+type UploadProgress = {
+  label: string;
+  percent: number;
+};
+
 const tabs: VendorTab[] = ["Overview", "Menu", "Documents", "Activity"];
 
 const AdminVendorsPage = () => {
+  const showToast = useToastStore((s) => s.showToast);
   const [data, setData] = useState<VendorsResponse | null>(null);
   const [selectedVendor, setSelectedVendor] = useState<AdminVendor | null>(null);
   const [activeTab, setActiveTab] = useState<VendorTab>("Overview");
   const [showAddItemModal, setShowAddItemModal] = useState(false);
   const [vendorModalMode, setVendorModalMode] = useState<"add" | "edit" | null>(null);
   const [loading, setLoading] = useState(true);
+  const [suspendingVendorId, setSuspendingVendorId] = useState<string | null>(null);
+  const [approvingVendorId, setApprovingVendorId] = useState<string | null>(null);
+
+  async function loadVendors() {
+    setLoading(true);
+
+    const response = await fetch(`${API_BASE_URL}/admin/vendors`, { credentials: "include" });
+    if (!response.ok) throw new Error("Unable to load vendors");
+
+    const result = (await response.json()) as VendorsResponse;
+    setData(result);
+    setLoading(false);
+  }
 
   useEffect(() => {
     let mounted = true;
 
-    fetch(`${API_BASE_URL}/admin/vendors`, { credentials: "include" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to load vendors");
-        return response.json() as Promise<VendorsResponse>;
-      })
+    loadVendors()
       .then((result) => {
-        if (mounted) setData(result);
+        if (!mounted) return;
       })
       .finally(() => {
         if (mounted) setLoading(false);
@@ -122,6 +167,72 @@ const AdminVendorsPage = () => {
 
     const detail = (await response.json()) as { vendor: AdminVendor };
     setSelectedVendor(detail.vendor);
+  }
+
+  async function refreshSelectedVendor(vendor: AdminVendor | null = selectedVendor) {
+    if (!vendor) return;
+
+    const response = await fetch(`${API_BASE_URL}/admin/vendors/${vendor.id}`, {
+      credentials: "include",
+    });
+
+    if (!response.ok) return;
+
+    const detail = (await response.json()) as { vendor: AdminVendor };
+    setSelectedVendor(detail.vendor);
+  }
+
+  async function suspendVendor(vendor: AdminVendor) {
+    const nextStatus = vendor.status === "suspended" ? "active" : "paused";
+    setSuspendingVendorId(vendor.id);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/vendors/${vendor.id}/status`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to update vendor status");
+      }
+
+      const result = (await response.json()) as { vendor: AdminVendor | null };
+      if (result.vendor) setSelectedVendor(result.vendor);
+      await loadVendors();
+      showToast(nextStatus === "paused" ? "Vendor suspended" : "Vendor reactivated", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to update vendor status", "error");
+    } finally {
+      setSuspendingVendorId(null);
+    }
+  }
+
+  async function approveVendor(vendor: AdminVendor) {
+    setApprovingVendorId(vendor.id);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/admin/vendors/${vendor.id}/approve`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to approve vendor");
+      }
+
+      const result = (await response.json()) as { vendor: AdminVendor | null };
+      if (result.vendor) setSelectedVendor(result.vendor);
+      await loadVendors();
+      showToast("Vendor approved successfully", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to approve vendor", "error");
+    } finally {
+      setApprovingVendorId(null);
+    }
   }
 
   const overviewStats = [
@@ -291,7 +402,14 @@ const AdminVendorsPage = () => {
 
             <div className="mt-5">
               {activeTab === "Overview" ? (
-                <OverviewTab vendor={selectedVendor} onEdit={() => setVendorModalMode("edit")} />
+                <OverviewTab
+                  vendor={selectedVendor}
+                  onEdit={() => setVendorModalMode("edit")}
+                  onApprove={() => void approveVendor(selectedVendor)}
+                  onSuspend={() => void suspendVendor(selectedVendor)}
+                  approving={approvingVendorId === selectedVendor.id}
+                  suspending={suspendingVendorId === selectedVendor.id}
+                />
               ) : null}
               {activeTab === "Menu" ? (
                 <MenuTab vendor={selectedVendor} onAddItem={() => setShowAddItemModal(true)} />
@@ -303,12 +421,30 @@ const AdminVendorsPage = () => {
         ) : null}
       </div>
 
-      {showAddItemModal ? <AddItemModal onClose={() => setShowAddItemModal(false)} /> : null}
+      {showAddItemModal ? (
+        <AddItemModal
+          vendor={selectedVendor}
+          showToast={showToast}
+          onClose={() => setShowAddItemModal(false)}
+          onSaved={() => {
+            setShowAddItemModal(false);
+            void refreshSelectedVendor();
+            showToast("Menu item added successfully", "success");
+          }}
+        />
+      ) : null}
       {vendorModalMode ? (
         <VendorFormModal
           mode={vendorModalMode}
           vendor={vendorModalMode === "edit" ? selectedVendor : null}
           onClose={() => setVendorModalMode(null)}
+          onSaved={(vendor) => {
+            setVendorModalMode(null);
+            void loadVendors();
+            if (vendor) setSelectedVendor(vendor);
+            showToast(vendorModalMode === "edit" ? "Vendor updated successfully" : "Vendor added successfully", "success");
+          }}
+          showToast={showToast}
         />
       ) : null}
     </div>
@@ -329,7 +465,23 @@ function VendorIdentity({ vendor }: { vendor: AdminVendor }) {
   );
 }
 
-function OverviewTab({ vendor, onEdit }: { vendor: AdminVendor; onEdit: () => void }) {
+function OverviewTab({
+  vendor,
+  onEdit,
+  onApprove,
+  onSuspend,
+  approving,
+  suspending,
+}: {
+  vendor: AdminVendor;
+  onEdit: () => void;
+  onApprove: () => void;
+  onSuspend: () => void;
+  approving: boolean;
+  suspending: boolean;
+}) {
+  const canApprove = vendor.status === "pending approval";
+
   return (
     <div className="space-y-5">
       <PanelSection title="Restaurant Information">
@@ -354,7 +506,7 @@ function OverviewTab({ vendor, onEdit }: { vendor: AdminVendor; onEdit: () => vo
         </div>
       </PanelSection>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className={`grid gap-3 ${canApprove ? "grid-cols-3" : "grid-cols-2"}`}>
         <button
           type="button"
           onClick={onEdit}
@@ -362,8 +514,23 @@ function OverviewTab({ vendor, onEdit }: { vendor: AdminVendor; onEdit: () => vo
         >
           Edit vendor
         </button>
-        <button type="button" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600">
-          Suspend
+        {canApprove ? (
+          <button
+            type="button"
+            onClick={onApprove}
+            disabled={approving}
+            className="rounded-lg bg-[#16A34A] px-3 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {approving ? "Approving..." : "Approve"}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onSuspend}
+          disabled={suspending}
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {suspending ? "Updating..." : vendor.status === "suspended" ? "Reactivate" : "Suspend"}
         </button>
       </div>
     </div>
@@ -479,7 +646,19 @@ function DocumentRow({ document }: { document: VendorDocument }) {
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-[#FE9A00]">
           <FaFileAlt className="text-[12px]" />
         </div>
-        <p className="text-[11px] font-semibold text-[#101828]">{document.name}</p>
+        <div>
+          <p className="text-[11px] font-semibold text-[#101828]">{document.name}</p>
+          {document.fileUrl ? (
+            <a
+              href={document.fileUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 block text-[10px] font-semibold text-[#FE9A00]"
+            >
+              View file
+            </a>
+          ) : null}
+        </div>
       </div>
       <StatusPill status={document.status} />
     </div>
@@ -559,23 +738,144 @@ function Skeleton({ className = "" }: { className?: string }) {
   return <div className={`animate-pulse rounded-md bg-gray-200/80 ${className}`} />;
 }
 
-function AddItemModal({ onClose }: { onClose: () => void }) {
+function getSelectedFile(formData: FormData, name: string) {
+  const value = formData.get(name);
+  if (!(value instanceof File) || value.size === 0) return null;
+
+  return value;
+}
+
+async function uploadAdminFile(
+  file: File | null,
+  type: CloudinaryUploadType,
+  onProgress?: (progress: UploadProgress) => void,
+) {
+  if (!file) return null;
+
+  const maxSize = type === "vendor_document" ? 8 * 1024 * 1024 : 4 * 1024 * 1024;
+  if (file.size > maxSize) {
+    throw new Error(type === "vendor_document" ? "Documents must be 8MB or smaller" : "Images must be 4MB or smaller");
+  }
+
+  if (type !== "vendor_document" && !file.type.startsWith("image/")) {
+    throw new Error("Please choose an image file");
+  }
+
+  onProgress?.({ label: `Preparing ${file.name}`, percent: 20 });
+
+  const signatureResponse = await fetch(`${API_BASE_URL}/uploads/signature`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type }),
+  });
+
+  if (!signatureResponse.ok) {
+    const errorBody = (await signatureResponse.json().catch(() => null)) as { message?: string } | null;
+    throw new Error(errorBody?.message ?? "Unable to prepare file upload");
+  }
+
+  const { upload } = (await signatureResponse.json()) as CloudinarySignatureResponse;
+  const cloudinaryFormData = new FormData();
+  cloudinaryFormData.append("file", file);
+  cloudinaryFormData.append("api_key", upload.apiKey);
+  cloudinaryFormData.append("timestamp", String(upload.timestamp));
+  cloudinaryFormData.append("signature", upload.signature);
+  cloudinaryFormData.append("folder", upload.folder);
+  cloudinaryFormData.append("public_id", upload.publicId);
+
+  onProgress?.({ label: `Uploading ${file.name}`, percent: 65 });
+
+  const cloudinaryResponse = await fetch(upload.uploadUrl, {
+    method: "POST",
+    body: cloudinaryFormData,
+  });
+
+  if (!cloudinaryResponse.ok) {
+    throw new Error("Unable to upload file");
+  }
+
+  const uploadedFile = (await cloudinaryResponse.json()) as CloudinaryUploadResponse;
+  onProgress?.({ label: `${file.name} uploaded`, percent: 100 });
+
+  return uploadedFile.secure_url;
+}
+
+function AddItemModal({
+  vendor,
+  showToast,
+  onClose,
+  onSaved,
+}: {
+  vendor: AdminVendor | null;
+  showToast: (message: string, type?: "success" | "error" | "info") => void;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
+
+  async function submitItem(formData: FormData) {
+    if (!vendor) return;
+
+    setSaving(true);
+    setProgress(null);
+
+    try {
+      const itemName = String(formData.get("itemName") ?? "").trim();
+      const category = String(formData.get("category") ?? "").trim();
+      const clientPrice = String(formData.get("clientPrice") ?? "").trim();
+
+      if (!itemName || !category || !clientPrice) {
+        throw new Error("Please enter item name, category, and client price");
+      }
+
+      const imageUrl = await uploadAdminFile(
+        getSelectedFile(formData, "itemPhoto"),
+        "menu_item_image",
+        setProgress,
+      );
+
+      const response = await fetch(`${API_BASE_URL}/admin/vendors/${vendor.id}/menu-items`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemName,
+          category,
+          clientPrice,
+          mandoPrice: formData.get("mandoPrice"),
+          imageUrl,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to add menu item");
+      }
+
+      onSaved();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to add menu item", "error");
+    } finally {
+      setSaving(false);
+      setProgress(null);
+    }
+  }
+
   return (
     <ModalShell title="Add Menu Item" subtitle="Create a restaurant menu item with client and Mando pricing." onClose={onClose}>
-      <div className="grid grid-cols-2 gap-4">
-        <FormField label="Item photo" type="file" optional />
-        <FormField label="Item name" placeholder="Jollof rice and chicken" />
-        <FormField label="Category" placeholder="Rice dishes" />
-        <FormField label="Client's price" type="number" placeholder="2500" />
-        <FormField label="Mando's price" type="number" placeholder="250" />
-      </div>
+      <form action={submitItem} noValidate>
+        <div className="grid grid-cols-2 gap-4">
+          <FileUploadField label="Item photo" name="itemPhoto" accept="image/*" progress={progress} optional imageOnly />
+          <FormField label="Item name" name="itemName" placeholder="Jollof rice and chicken" />
+          <FormField label="Category" name="category" placeholder="Rice dishes" />
+          <FormField label="Client's price" name="clientPrice" type="number" placeholder="2500" />
+          <FormField label="Mando's price" name="mandoPrice" type="number" placeholder="250" />
+        </div>
 
-      <ModalActions
-        cancelLabel="Cancel"
-        actionLabel="Add item"
-        onCancel={onClose}
-        onAction={onClose}
-      />
+        <ModalActions cancelLabel="Cancel" actionLabel={saving ? "Uploading..." : "Add item"} onCancel={onClose} disabled={saving} />
+      </form>
     </ModalShell>
   );
 }
@@ -583,14 +883,101 @@ function AddItemModal({ onClose }: { onClose: () => void }) {
 function VendorFormModal({
   mode,
   vendor,
+  showToast,
   onClose,
+  onSaved,
 }: {
   mode: "add" | "edit";
   vendor: AdminVendor | null;
+  showToast: (message: string, type?: "success" | "error" | "info") => void;
   onClose: () => void;
+  onSaved: (vendor: AdminVendor | null) => void;
 }) {
   const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
+  const formRef = useRef<HTMLFormElement | null>(null);
   const steps = ["Restaurant info", "Contact & owner", "Operations", "Documents"];
+
+  function saveVendorFromForm() {
+    if (!formRef.current || saving) return;
+    void submitVendor(new FormData(formRef.current));
+  }
+
+  async function submitVendor(formData: FormData) {
+    const endpoint =
+      mode === "edit" && vendor
+        ? `${API_BASE_URL}/admin/vendors/${vendor.id}`
+        : `${API_BASE_URL}/admin/vendors`;
+    const method = mode === "edit" ? "PATCH" : "POST";
+
+    setSaving(true);
+    setProgress(null);
+
+    try {
+      const requiredFields = [
+        ["restaurantName", "restaurant name"],
+        ["fullAddress", "full address"],
+        ["serviceArea", "service area"],
+        ["ownerName", "owner/manager name"],
+        ["phone", "phone number"],
+        ["email", "email address"],
+        ["minimumOrder", "minimum order"],
+      ] as const;
+
+      for (const [fieldName, label] of requiredFields) {
+        if (!String(formData.get(fieldName) ?? "").trim()) {
+          throw new Error(`Please enter ${label}`);
+        }
+      }
+
+      const [logoUrl, cacCertificateUrl, foodHandlerCertificateUrl, healthSafetyPermitUrl] = await Promise.all([
+        uploadAdminFile(getSelectedFile(formData, "logo"), "restaurant_logo", setProgress),
+        uploadAdminFile(getSelectedFile(formData, "cacCertificate"), "vendor_document", setProgress),
+        uploadAdminFile(getSelectedFile(formData, "foodHandlerCertificate"), "vendor_document", setProgress),
+        uploadAdminFile(getSelectedFile(formData, "healthSafetyPermit"), "vendor_document", setProgress),
+      ]);
+
+      const response = await fetch(endpoint, {
+        method,
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          restaurantName: formData.get("restaurantName"),
+          fullAddress: formData.get("fullAddress"),
+          serviceArea: formData.get("serviceArea"),
+          logoUrl,
+          ownerName: formData.get("ownerName"),
+          phone: formData.get("phone"),
+          email: formData.get("email"),
+          website: formData.get("website"),
+          openingTime: formData.get("openingTime"),
+          closingTime: formData.get("closingTime"),
+          openDays: formData.get("openDays"),
+          deliveryRadius: formData.get("deliveryRadius"),
+          minimumOrder: formData.get("minimumOrder"),
+          deliveryType: formData.get("deliveryType"),
+          cacCertificateUrl,
+          foodHandlerCertificateUrl,
+          taxIdentificationNumber: formData.get("taxIdentificationNumber"),
+          healthSafetyPermitUrl,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to save vendor");
+      }
+
+      const result = (await response.json()) as { vendor: AdminVendor | null };
+      onSaved(result.vendor);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to save vendor", "error");
+    } finally {
+      setSaving(false);
+      setProgress(null);
+    }
+  }
 
   return (
     <ModalShell
@@ -599,65 +986,74 @@ function VendorFormModal({
       onClose={onClose}
       wide
     >
-      <div className="grid grid-cols-4 gap-2">
-        {steps.map((item, index) => {
-          const stepNumber = index + 1;
-          const active = stepNumber === step;
+      <form ref={formRef} onSubmit={(event) => event.preventDefault()} noValidate>
+        <div className="grid grid-cols-4 gap-2">
+          {steps.map((item, index) => {
+            const stepNumber = index + 1;
+            const active = stepNumber === step;
 
-          return (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setStep(stepNumber)}
-              className={`rounded-lg border px-3 py-2 text-left text-[10px] font-semibold ${
-                active ? "border-[#FE9A00] bg-[#FFFBEB] text-[#101828]" : "border-gray-200 text-[#6A7282]"
-              }`}
-            >
-              <span className="block text-[9px] text-[#99A1AF]">Step {stepNumber}</span>
-              {item}
-            </button>
-          );
-        })}
-      </div>
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setStep(stepNumber)}
+                className={`rounded-lg border px-3 py-2 text-left text-[10px] font-semibold ${
+                  active ? "border-[#FE9A00] bg-[#FFFBEB] text-[#101828]" : "border-gray-200 text-[#6A7282]"
+                }`}
+              >
+                <span className="block text-[9px] text-[#99A1AF]">Step {stepNumber}</span>
+                {item}
+              </button>
+            );
+          })}
+        </div>
 
-      <div className="mt-5">
-        {step === 1 ? <RestaurantInfoStep vendor={vendor} /> : null}
-        {step === 2 ? <ContactOwnerStep vendor={vendor} /> : null}
-        {step === 3 ? <OperationsStep vendor={vendor} /> : null}
-        {step === 4 ? <DocumentsStep /> : null}
-      </div>
+        <div className="mt-5">
+          <div className={step === 1 ? "block" : "hidden"}><RestaurantInfoStep vendor={vendor} progress={progress} /></div>
+          <div className={step === 2 ? "block" : "hidden"}><ContactOwnerStep vendor={vendor} /></div>
+          <div className={step === 3 ? "block" : "hidden"}><OperationsStep vendor={vendor} /></div>
+          <div className={step === 4 ? "block" : "hidden"}><DocumentsStep vendor={vendor} progress={progress} /></div>
+        </div>
 
-      <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
-        <button
-          type="button"
-          onClick={step === 1 ? onClose : () => setStep((current) => current - 1)}
-          className="rounded-lg border border-gray-200 px-4 py-2 text-[11px] font-semibold text-[#6A7282]"
-        >
-          {step === 1 ? "Cancel" : "Back"}
-        </button>
-        <button
-          type="button"
-          onClick={step === 4 ? onClose : () => setStep((current) => current + 1)}
-          className="rounded-lg bg-[#FE9A00] px-4 py-2 text-[11px] font-semibold text-white"
-        >
-          {step === 4 ? (mode === "add" ? "Add vendor" : "Save vendor") : "Continue"}
-        </button>
-      </div>
+        <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
+          <button
+            type="button"
+            onClick={step === 1 ? onClose : () => setStep((current) => current - 1)}
+            className="rounded-lg border border-gray-200 px-4 py-2 text-[11px] font-semibold text-[#6A7282]"
+          >
+            {step === 1 ? "Cancel" : "Back"}
+          </button>
+          <button
+            type="button"
+            onClick={step === 4 ? saveVendorFromForm : () => setStep((current) => current + 1)}
+            disabled={saving}
+            className="rounded-lg bg-[#FE9A00] px-4 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Uploading..." : step === 4 ? (mode === "add" ? "Add vendor" : "Save vendor") : "Continue"}
+          </button>
+        </div>
+      </form>
     </ModalShell>
   );
 }
 
-function RestaurantInfoStep({ vendor }: { vendor: AdminVendor | null }) {
+function RestaurantInfoStep({
+  vendor,
+  progress,
+}: {
+  vendor: AdminVendor | null;
+  progress: UploadProgress | null;
+}) {
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-amber-100 bg-[#FFFBEB] px-3 py-2 text-[10px] font-semibold text-[#B7791F]">
         Make sure the restaurant name and address match the official CAC registration details.
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <FormField label="Logo" type="file" optional />
-        <FormField label="Restaurant name" defaultValue={vendor?.name} placeholder="Mama Chef Cafe" />
-        <FormField label="Full address" defaultValue={vendor?.address} placeholder="Fashina Road, Ile-Ife" />
-        <FormField label="Service city/area" defaultValue={vendor?.location} placeholder="Fashina, Ile-Ife" />
+        <FileUploadField label="Logo" name="logo" accept="image/*" progress={progress} optional imageOnly />
+        <FormField label="Restaurant name" name="restaurantName" defaultValue={vendor?.name} placeholder="Mama Chef Cafe" />
+        <FormField label="Full address" name="fullAddress" defaultValue={vendor?.address} placeholder="Fashina Road, Ile-Ife" />
+        <FormField label="Service city/area" name="serviceArea" defaultValue={vendor?.location} placeholder="Fashina, Ile-Ife" />
       </div>
     </div>
   );
@@ -667,10 +1063,10 @@ function ContactOwnerStep({ vendor }: { vendor: AdminVendor | null }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <FormField label="Owner/manager name" defaultValue={vendor?.manager.name} placeholder="Restaurant manager" />
-        <FormField label="Phone number" defaultValue={vendor?.manager.phone ?? vendor?.phone ?? ""} placeholder="08000000000" />
-        <FormField label="Email address" type="email" defaultValue={vendor?.manager.email ?? ""} placeholder="manager@restaurant.com" />
-        <FormField label="Website" optional placeholder="https://restaurant.com" />
+        <FormField label="Owner/manager name" name="ownerName" defaultValue={vendor?.manager.name} placeholder="Restaurant manager" />
+        <FormField label="Phone number" name="phone" defaultValue={vendor?.manager.phone ?? vendor?.phone ?? ""} placeholder="08000000000" />
+        <FormField label="Email address" name="email" type="email" defaultValue={vendor?.manager.email ?? ""} placeholder="manager@restaurant.com" />
+        <FormField label="Website" name="website" defaultValue={vendor?.operations?.website ?? ""} optional placeholder="https://restaurant.com" />
       </div>
       <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
         <h3 className="text-[11px] font-semibold text-[#101828]">Account access</h3>
@@ -685,24 +1081,104 @@ function ContactOwnerStep({ vendor }: { vendor: AdminVendor | null }) {
 function OperationsStep({ vendor }: { vendor: AdminVendor | null }) {
   return (
     <div className="grid grid-cols-2 gap-4">
-      <FormField label="Opening time" type="time" />
-      <FormField label="Closing time" type="time" />
-      <FormField label="Open days" placeholder="Mon - Sat" />
-      <FormField label="Delivery radius" placeholder="5km" />
-      <FormField label="Minimum order" type="number" defaultValue={vendor ? String(vendor.clientPrice) : ""} placeholder="2500" />
-      <SelectField label="Delivery type" options={["Mando rider", "Vendor delivery", "Pickup only"]} />
+      <FormField label="Opening time" name="openingTime" type="time" defaultValue={vendor?.operations?.openingTime ?? ""} />
+      <FormField label="Closing time" name="closingTime" type="time" defaultValue={vendor?.operations?.closingTime ?? ""} />
+      <FormField label="Open days" name="openDays" defaultValue={vendor?.operations?.openDays ?? ""} placeholder="Mon - Sat" />
+      <FormField label="Delivery radius" name="deliveryRadius" defaultValue={vendor?.operations?.deliveryRadius ?? ""} placeholder="5km" />
+      <FormField label="Minimum order" name="minimumOrder" type="number" defaultValue={vendor ? String(vendor.clientPrice) : ""} placeholder="2500" />
+      <SelectField label="Delivery type" name="deliveryType" defaultValue={vendor?.operations?.deliveryType ?? "Mando rider"} options={["Mando rider", "Vendor delivery", "Pickup only"]} />
     </div>
   );
 }
 
-function DocumentsStep() {
+function DocumentsStep({
+  vendor,
+  progress,
+}: {
+  vendor?: AdminVendor | null;
+  progress: UploadProgress | null;
+}) {
+  const taxDocument = vendor?.documents?.find((document) =>
+    document.name.toLowerCase().includes("tax"),
+  );
+
   return (
     <div className="grid grid-cols-2 gap-4">
-      <FormField label="CAC certificate" type="file" />
-      <FormField label="Food Handler certificate" type="file" />
-      <FormField label="Tax Identification Number" placeholder="TIN" />
-      <FormField label="Health and safety permit" type="file" optional />
+      <FileUploadField label="CAC certificate" name="cacCertificate" accept="image/*,.pdf" progress={progress} />
+      <FileUploadField label="Food Handler certificate" name="foodHandlerCertificate" accept="image/*,.pdf" progress={progress} />
+      <FormField label="Tax Identification Number" name="taxIdentificationNumber" defaultValue={taxDocument?.documentNumber ?? ""} placeholder="TIN" />
+      <FileUploadField label="Health and safety permit" name="healthSafetyPermit" accept="image/*,.pdf" progress={progress} optional />
     </div>
+  );
+}
+
+function FileUploadField({
+  label,
+  name,
+  accept,
+  optional,
+  imageOnly,
+  progress,
+}: {
+  label: string;
+  name: string;
+  accept: string;
+  optional?: boolean;
+  imageOnly?: boolean;
+  progress: UploadProgress | null;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const isImagePreview = Boolean(previewUrl);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  return (
+    <label className="block">
+      <span className="text-[10px] font-semibold text-[#6A7282]">
+        {label} {optional ? <span className="font-normal text-[#99A1AF]">(optional)</span> : null}
+      </span>
+      <input
+        type="file"
+        name={name}
+        accept={accept}
+        className="sr-only"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0] ?? null;
+          setFileName(file?.name ?? "");
+
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          setPreviewUrl(file && file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
+        }}
+      />
+      <div className="mt-2 flex min-h-[118px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-4 text-center transition hover:border-[#FE9A00] hover:bg-[#FFFBEB]">
+        {isImagePreview ? (
+          <img src={previewUrl ?? ""} alt="" className="h-16 w-16 rounded-xl object-cover" />
+        ) : (
+          <div className="flex h-11 w-11 items-center justify-center rounded-full bg-white text-[#FE9A00] shadow-sm">
+            {fileName ? <FaFileAlt className="text-sm" /> : imageOnly ? <FaImage className="text-sm" /> : <FaCloudUploadAlt className="text-base" />}
+          </div>
+        )}
+        <p className="mt-3 max-w-full truncate text-[11px] font-semibold text-[#101828]">
+          {fileName || `Upload ${label.toLowerCase()}`}
+        </p>
+        <p className="mt-1 text-[10px] text-[#99A1AF]">
+          {imageOnly ? "PNG or JPG" : "PDF, PNG or JPG"}
+        </p>
+        {progress && fileName ? (
+          <div className="mt-3 w-full">
+            <div className="h-1.5 overflow-hidden rounded-full bg-white">
+              <div className="h-full rounded-full bg-[#FE9A00] transition-all" style={{ width: `${progress.percent}%` }} />
+            </div>
+            <p className="mt-1 truncate text-[10px] font-semibold text-[#B7791F]">{progress.label}</p>
+          </div>
+        ) : null}
+      </div>
+    </label>
   );
 }
 
@@ -745,19 +1221,19 @@ function ModalActions({
   cancelLabel,
   actionLabel,
   onCancel,
-  onAction,
+  disabled,
 }: {
   cancelLabel: string;
   actionLabel: string;
   onCancel: () => void;
-  onAction: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
       <button type="button" onClick={onCancel} className="rounded-lg border border-gray-200 px-4 py-2 text-[11px] font-semibold text-[#6A7282]">
         {cancelLabel}
       </button>
-      <button type="button" onClick={onAction} className="rounded-lg bg-[#FE9A00] px-4 py-2 text-[11px] font-semibold text-white">
+      <button type="submit" disabled={disabled} className="rounded-lg bg-[#FE9A00] px-4 py-2 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
         {actionLabel}
       </button>
     </div>
@@ -782,11 +1258,21 @@ function FormField({
   );
 }
 
-function SelectField({ label, options }: { label: string; options: string[] }) {
+function SelectField({
+  label,
+  name,
+  options,
+  defaultValue,
+}: {
+  label: string;
+  name: string;
+  options: string[];
+  defaultValue?: string;
+}) {
   return (
     <label className="block">
       <span className="text-[10px] font-semibold text-[#6A7282]">{label}</span>
-      <select className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] outline-none transition focus:border-[#FE9A00] focus:ring-2 focus:ring-[#FE9A00]/10">
+      <select name={name} defaultValue={defaultValue} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] outline-none transition focus:border-[#FE9A00] focus:ring-2 focus:ring-[#FE9A00]/10">
         {options.map((option) => (
           <option key={option}>{option}</option>
         ))}

@@ -43,6 +43,13 @@
       "when": 1782840000000,
       "tag": "0005_mando_revenue_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783694671839,
+      "tag": "0006_new_fenris",
+      "breakpoints": true
     }
   ]
 }

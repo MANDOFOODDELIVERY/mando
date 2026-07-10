@@ -1,9 +1,10 @@
 import type { FastifyInstance, FastifyReply } from 'fastify'
-import { desc, eq, inArray } from 'drizzle-orm'
+import { desc, eq, inArray, sql } from 'drizzle-orm'
 import { z } from 'zod'
 
 import {
   createSessionToken,
+  hashPassword,
   serializeClearSessionCookie,
   serializeSessionCookie,
   verifyPassword,
@@ -11,6 +12,7 @@ import {
 import { getCurrentSessionContext } from '../auth/current-session.js'
 import { database } from '../db/client.js'
 import {
+  adminPayoutSettings,
   authSessions,
   deliveries,
   menuItems,
@@ -25,12 +27,14 @@ import {
   profiles,
   restaurantEarnings,
   restaurantMembers,
+  restaurantOperations,
   restaurants,
   riderProfiles,
   salesAgentProfiles,
   serviceAreas,
   userRoles,
   users,
+  vendorDocuments,
   reviews,
 } from '../db/schema.js'
 
@@ -45,6 +49,59 @@ const orderParamsSchema = z.object({
 
 const vendorParamsSchema = z.object({
   vendorId: z.uuid(),
+})
+
+const menuItemBodySchema = z.object({
+  itemName: z.string().trim().min(2),
+  category: z.string().trim().min(1),
+  clientPrice: z.coerce.number().int().nonnegative(),
+  mandoPrice: z.coerce.number().int().nonnegative().optional(),
+  imageUrl: z.url().nullable().optional(),
+})
+
+const vendorBodySchema = z.object({
+  restaurantName: z.string().trim().min(2),
+  fullAddress: z.string().trim().min(4),
+  serviceArea: z.string().trim().min(2),
+  logoUrl: z.url().nullable().optional(),
+  ownerName: z.string().trim().min(2),
+  phone: z.string().trim().min(5),
+  email: z.email().trim().toLowerCase(),
+  website: z.string().trim().optional(),
+  openingTime: z.string().trim().optional(),
+  closingTime: z.string().trim().optional(),
+  openDays: z.string().trim().optional(),
+  deliveryRadius: z.string().trim().optional(),
+  minimumOrder: z.coerce.number().int().nonnegative().default(0),
+  deliveryType: z.string().trim().optional(),
+  cacCertificateUrl: z.url().nullable().optional(),
+  foodHandlerCertificateUrl: z.url().nullable().optional(),
+  taxIdentificationNumber: z.string().trim().optional(),
+  healthSafetyPermitUrl: z.url().nullable().optional(),
+})
+
+const commissionBodySchema = z.object({
+  commissionRatePercent: z.coerce.number().min(0).max(100),
+})
+
+const payoutSettingsBodySchema = z.object({
+  frequency: z.string().trim().min(1),
+  payoutTime: z.string().trim().min(1),
+  minimumWithdrawal: z.coerce.number().int().nonnegative(),
+  autoProcess: z.boolean(),
+  autoDeductCommission: z.boolean().optional(),
+})
+
+const payoutRequestParamsSchema = z.object({
+  requestId: z.uuid(),
+})
+
+const payoutStatusBodySchema = z.object({
+  status: z.enum(['approved', 'rejected']),
+})
+
+const vendorStatusBodySchema = z.object({
+  status: z.enum(['active', 'paused', 'archived']),
 })
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -277,6 +334,293 @@ export async function adminRoutes(app: FastifyInstance) {
     return reply.status(200).send(data)
   })
 
+  app.patch('/vendors/commissions/settings', async (request, reply) => {
+    const parsedBody = payoutSettingsBodySchema.safeParse(request.body)
+    if (!parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please provide valid payout settings.',
+      })
+    }
+
+    const [settings] = await database
+      .insert(adminPayoutSettings)
+      .values({
+        settingsKey: 'default',
+        frequency: parsedBody.data.frequency,
+        payoutTime: parsedBody.data.payoutTime,
+        minimumWithdrawal: parsedBody.data.minimumWithdrawal,
+        autoProcess: parsedBody.data.autoProcess,
+        autoDeductCommission: parsedBody.data.autoDeductCommission ?? true,
+      })
+      .onConflictDoUpdate({
+        target: adminPayoutSettings.settingsKey,
+        set: {
+          frequency: parsedBody.data.frequency,
+          payoutTime: parsedBody.data.payoutTime,
+          minimumWithdrawal: parsedBody.data.minimumWithdrawal,
+          autoProcess: parsedBody.data.autoProcess,
+          autoDeductCommission: parsedBody.data.autoDeductCommission ?? true,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({
+        frequency: adminPayoutSettings.frequency,
+        payoutTime: adminPayoutSettings.payoutTime,
+        minimumWithdrawal: adminPayoutSettings.minimumWithdrawal,
+        autoProcess: adminPayoutSettings.autoProcess,
+        autoDeductCommission: adminPayoutSettings.autoDeductCommission,
+      })
+
+    return reply.status(200).send({ settings })
+  })
+
+  app.patch('/vendors/withdrawals/:requestId/status', async (request, reply) => {
+    const parsedParams = payoutRequestParamsSchema.safeParse(request.params)
+    const parsedBody = payoutStatusBodySchema.safeParse(request.body)
+
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please choose a valid withdrawal request and status.',
+      })
+    }
+
+    const [updatedRequest] = await database
+      .update(payoutRequests)
+      .set({
+        status: parsedBody.data.status,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(payoutRequests.id, parsedParams.data.requestId))
+      .returning({ id: payoutRequests.id, status: payoutRequests.status })
+
+    if (!updatedRequest) {
+      return reply.status(404).send({
+        error: 'withdrawal_not_found',
+        message: 'Withdrawal request not found.',
+      })
+    }
+
+    return reply.status(200).send({ request: updatedRequest })
+  })
+
+  app.post('/vendors', async (request, reply) => {
+    const parsedBody = vendorBodySchema.safeParse(request.body)
+    if (!parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please complete the vendor onboarding form.',
+      })
+    }
+
+    try {
+      const vendor = await createAdminVendor(parsedBody.data)
+      return reply.status(201).send({ vendor })
+    } catch (error) {
+      request.log.error(error)
+
+      if (isUniqueViolation(error)) {
+        return reply.status(409).send({
+          error: 'vendor_exists',
+          message:
+            'A user or restaurant with these details already exists. Please use another email or restaurant name.',
+        })
+      }
+
+      return reply.status(500).send({
+        error: 'vendor_create_failed',
+        message: 'Unable to create vendor. Please try again.',
+      })
+    }
+  })
+
+  app.patch('/vendors/:vendorId', async (request, reply) => {
+    const parsedParams = vendorParamsSchema.safeParse(request.params)
+    const parsedBody = vendorBodySchema.safeParse(request.body)
+
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please provide valid vendor details.',
+      })
+    }
+
+    const vendor = await updateAdminVendor(parsedParams.data.vendorId, parsedBody.data)
+    if (!vendor) {
+      return reply.status(404).send({
+        error: 'vendor_not_found',
+        message: 'Vendor not found.',
+      })
+    }
+
+    return reply.status(200).send({ vendor })
+  })
+
+  app.post('/vendors/:vendorId/menu-items', async (request, reply) => {
+    const parsedParams = vendorParamsSchema.safeParse(request.params)
+    const parsedBody = menuItemBodySchema.safeParse(request.body)
+
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please provide a valid menu item.',
+      })
+    }
+
+    const [restaurant] = await database
+      .select({ id: restaurants.id, platformCommissionBps: restaurants.platformCommissionBps })
+      .from(restaurants)
+      .where(eq(restaurants.id, parsedParams.data.vendorId))
+      .limit(1)
+
+    if (!restaurant) {
+      return reply.status(404).send({
+        error: 'vendor_not_found',
+        message: 'Vendor not found.',
+      })
+    }
+
+    const [item] = await database
+      .insert(menuItems)
+      .values({
+        restaurantId: restaurant.id,
+        name: parsedBody.data.itemName,
+        description: parsedBody.data.category,
+        priceAmount: parsedBody.data.clientPrice,
+        imageUrl: parsedBody.data.imageUrl || null,
+        isAvailable: true,
+      })
+      .returning({
+        id: menuItems.id,
+        name: menuItems.name,
+        description: menuItems.description,
+        priceAmount: menuItems.priceAmount,
+        isAvailable: menuItems.isAvailable,
+      })
+
+    return reply.status(201).send({
+      item: {
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        clientPrice: item.priceAmount,
+        mandoShare:
+          parsedBody.data.mandoPrice ??
+          calculateCommissionAmount(item.priceAmount, restaurant.platformCommissionBps),
+        vendorShare:
+          item.priceAmount -
+          (parsedBody.data.mandoPrice ??
+            calculateCommissionAmount(item.priceAmount, restaurant.platformCommissionBps)),
+        status: item.isAvailable ? 'available' : 'unavailable',
+      },
+    })
+  })
+
+  app.patch('/vendors/:vendorId/commission', async (request, reply) => {
+    const parsedParams = vendorParamsSchema.safeParse(request.params)
+    const parsedBody = commissionBodySchema.safeParse(request.body)
+
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please provide a valid commission rate.',
+      })
+    }
+
+    const commissionRateBps = Math.round(parsedBody.data.commissionRatePercent * 100)
+    const [restaurant] = await database
+      .update(restaurants)
+      .set({ platformCommissionBps: commissionRateBps, updatedAt: new Date() })
+      .where(eq(restaurants.id, parsedParams.data.vendorId))
+      .returning({
+        id: restaurants.id,
+        name: restaurants.name,
+        platformCommissionBps: restaurants.platformCommissionBps,
+      })
+
+    if (!restaurant) {
+      return reply.status(404).send({
+        error: 'vendor_not_found',
+        message: 'Vendor not found.',
+      })
+    }
+
+    return reply.status(200).send({
+      restaurant: {
+        id: restaurant.id,
+        name: restaurant.name,
+        commissionRateBps: restaurant.platformCommissionBps,
+      },
+    })
+  })
+
+  app.patch('/vendors/:vendorId/status', async (request, reply) => {
+    const parsedParams = vendorParamsSchema.safeParse(request.params)
+    const parsedBody = vendorStatusBodySchema.safeParse(request.body)
+
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please choose a valid vendor status.',
+      })
+    }
+
+    const [restaurant] = await database
+      .update(restaurants)
+      .set({
+        status: parsedBody.data.status,
+        isVerified: parsedBody.data.status === 'active' ? true : undefined,
+        onboardedAt: parsedBody.data.status === 'active' ? new Date() : undefined,
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, parsedParams.data.vendorId))
+      .returning({ id: restaurants.id })
+
+    if (!restaurant) {
+      return reply.status(404).send({
+        error: 'vendor_not_found',
+        message: 'Vendor not found.',
+      })
+    }
+
+    const vendor = await selectAdminVendorDetail(restaurant.id)
+    return reply.status(200).send({ vendor })
+  })
+
+  app.patch('/vendors/:vendorId/approve', async (request, reply) => {
+    const parsedParams = vendorParamsSchema.safeParse(request.params)
+
+    if (!parsedParams.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please choose a valid vendor.',
+      })
+    }
+
+    const [restaurant] = await database
+      .update(restaurants)
+      .set({
+        status: 'active',
+        isVerified: true,
+        onboardedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(restaurants.id, parsedParams.data.vendorId))
+      .returning({ id: restaurants.id })
+
+    if (!restaurant) {
+      return reply.status(404).send({
+        error: 'vendor_not_found',
+        message: 'Vendor not found.',
+      })
+    }
+
+    const vendor = await selectAdminVendorDetail(restaurant.id)
+    return reply.status(200).send({ vendor })
+  })
+
   app.get('/vendors/:vendorId', async (request, reply) => {
     const parsedParams = vendorParamsSchema.safeParse(request.params)
     if (!parsedParams.success) {
@@ -429,7 +773,7 @@ async function selectAdminVendorDetail(vendorId: string) {
   const vendor = vendorRows.find((row) => row.id === vendorId)
   if (!vendor) return null
 
-  const [menuRows, orderRows] = await Promise.all([
+  const [menuRows, orderRows, operationRows, documentRows] = await Promise.all([
     database.select().from(menuItems).where(eq(menuItems.restaurantId, vendorId)),
     database
       .select({
@@ -443,11 +787,41 @@ async function selectAdminVendorDetail(vendorId: string) {
       .where(eq(orders.restaurantId, vendorId))
       .orderBy(desc(orders.createdAt))
       .limit(8),
+    database
+      .select()
+      .from(restaurantOperations)
+      .where(eq(restaurantOperations.restaurantId, vendorId))
+      .limit(1),
+    database
+      .select()
+      .from(vendorDocuments)
+      .where(eq(vendorDocuments.restaurantId, vendorId))
+      .orderBy(vendorDocuments.createdAt),
   ])
+
+  const operations = operationRows[0] ?? null
 
   return {
     ...vendor,
-    documents: buildVendorDocuments(vendor),
+    operations: operations
+      ? {
+          openingTime: operations.openingTime,
+          closingTime: operations.closingTime,
+          openDays: operations.openDays,
+          deliveryRadius: operations.deliveryRadius,
+          deliveryType: operations.deliveryType,
+          website: operations.website,
+        }
+      : null,
+    documents: documentRows.length
+      ? documentRows.map((document) => ({
+          id: document.id,
+          name: document.name,
+          status: document.status,
+          documentNumber: document.documentNumber,
+          fileUrl: document.fileUrl,
+        }))
+      : buildVendorDocuments(vendor),
     menu: menuRows.map((item) => {
       const mandoShare = calculateCommissionAmount(item.priceAmount, vendor.commissionRateBps)
 
@@ -471,7 +845,7 @@ async function selectAdminVendorDetail(vendorId: string) {
 }
 
 async function selectAdminVendorCommissions() {
-  const [vendorRows, requestRows] = await Promise.all([
+  const [vendorRows, requestRows, payoutSettings] = await Promise.all([
     selectAdminVendors(),
     database
       .select({
@@ -486,6 +860,7 @@ async function selectAdminVendorCommissions() {
       .from(payoutRequests)
       .where(eq(payoutRequests.type, 'restaurant_earnings'))
       .orderBy(desc(payoutRequests.requestedAt)),
+    selectAdminPayoutSettings(),
   ])
 
   const requestRestaurantIds = requestRows
@@ -523,12 +898,7 @@ async function selectAdminVendorCommissions() {
       commissionRateBps: vendor.commissionRateBps,
       status: vendor.status,
     })),
-    payoutSettings: {
-      frequency: 'Weekly',
-      payoutTime: '17:00',
-      minimumWithdrawal: 5000,
-      autoProcess: false,
-    },
+    payoutSettings,
     withdrawalRequests: requestRows.map((request) => {
       const restaurant = request.restaurantId ? restaurantById.get(request.restaurantId) : null
       const vendorOrders = request.restaurantId
@@ -559,6 +929,296 @@ async function selectAdminVendorCommissions() {
       }
     }),
   }
+}
+
+async function createAdminVendor(input: z.infer<typeof vendorBodySchema>) {
+  const [existingUser] = await database
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, input.email))
+    .limit(1)
+
+  if (existingUser) {
+    const error = new Error('Vendor owner email already exists')
+    ;(error as { code?: string }).code = '23505'
+    throw error
+  }
+
+  const serviceArea = await ensureServiceArea(input.serviceArea)
+  const passwordHash = await hashPassword(createTemporaryPassword())
+  const slug = await createUniqueRestaurantSlug(input.restaurantName)
+
+  const [user] = await database
+    .insert(users)
+    .values({
+      email: input.email,
+      passwordHash,
+      status: 'active',
+      emailVerifiedAt: new Date(),
+    })
+    .returning({ id: users.id, email: users.email })
+
+  await database.insert(profiles).values({
+    userId: user.id,
+    fullName: input.ownerName,
+    phone: input.phone,
+  })
+
+  await database.insert(userRoles).values({
+    userId: user.id,
+    role: 'restaurant',
+  })
+
+  const [restaurant] = await database
+    .insert(restaurants)
+    .values({
+      slug,
+      name: input.restaurantName,
+      description: input.deliveryType || 'Restaurant vendor',
+      phone: input.phone,
+      serviceAreaId: serviceArea.id,
+      streetAddress: input.fullAddress,
+      minimumOrderAmount: input.minimumOrder,
+      platformCommissionBps: 1000,
+      imageUrl: input.logoUrl || null,
+      status: 'draft',
+      isVerified: false,
+    })
+    .returning({ id: restaurants.id })
+
+  await database.insert(restaurantMembers).values({
+    restaurantId: restaurant.id,
+    userId: user.id,
+    membershipRole: 'owner',
+    status: 'active',
+  })
+
+  await upsertRestaurantOperations(restaurant.id, input)
+  await upsertVendorDocuments(restaurant.id, input)
+
+  return selectAdminVendorDetail(restaurant.id)
+}
+
+async function updateAdminVendor(
+  vendorId: string,
+  input: z.infer<typeof vendorBodySchema>,
+) {
+  const serviceArea = await ensureServiceArea(input.serviceArea)
+  const [restaurant] = await database
+    .update(restaurants)
+    .set({
+      name: input.restaurantName,
+      description: input.deliveryType || 'Restaurant vendor',
+      phone: input.phone,
+      serviceAreaId: serviceArea.id,
+      streetAddress: input.fullAddress,
+      minimumOrderAmount: input.minimumOrder,
+      ...(input.logoUrl ? { imageUrl: input.logoUrl } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(restaurants.id, vendorId))
+    .returning({ id: restaurants.id })
+
+  if (!restaurant) return null
+
+  const manager = await selectRestaurantManager(vendorId)
+  if (manager) {
+    await database
+      .update(users)
+      .set({ email: input.email, updatedAt: new Date() })
+      .where(eq(users.id, manager.userId))
+
+    await database
+      .insert(profiles)
+      .values({
+        userId: manager.userId,
+        fullName: input.ownerName,
+        phone: input.phone,
+      })
+      .onConflictDoUpdate({
+        target: profiles.userId,
+        set: {
+          fullName: input.ownerName,
+          phone: input.phone,
+          updatedAt: new Date(),
+        },
+      })
+  }
+
+  await upsertRestaurantOperations(restaurant.id, input)
+  await upsertVendorDocuments(restaurant.id, input)
+
+  return selectAdminVendorDetail(restaurant.id)
+}
+
+async function upsertRestaurantOperations(
+  restaurantId: string,
+  input: z.infer<typeof vendorBodySchema>,
+) {
+  await database
+    .insert(restaurantOperations)
+    .values({
+      restaurantId,
+      openingTime: input.openingTime || null,
+      closingTime: input.closingTime || null,
+      openDays: input.openDays || null,
+      deliveryRadius: input.deliveryRadius || null,
+      deliveryType: input.deliveryType || null,
+      website: input.website || null,
+    })
+    .onConflictDoUpdate({
+      target: restaurantOperations.restaurantId,
+      set: {
+        openingTime: input.openingTime || null,
+        closingTime: input.closingTime || null,
+        openDays: input.openDays || null,
+        deliveryRadius: input.deliveryRadius || null,
+        deliveryType: input.deliveryType || null,
+        website: input.website || null,
+        updatedAt: new Date(),
+      },
+    })
+}
+
+async function upsertVendorDocuments(
+  restaurantId: string,
+  input: z.infer<typeof vendorBodySchema>,
+) {
+  const documents: (typeof vendorDocuments.$inferInsert)[] = [
+    {
+      restaurantId,
+      type: 'cac_certificate',
+      name: 'CAC certificate',
+      fileUrl: input.cacCertificateUrl || null,
+      status: input.cacCertificateUrl ? 'uploaded' : 'pending',
+      uploadedAt: input.cacCertificateUrl ? new Date() : null,
+    },
+    {
+      restaurantId,
+      type: 'food_handler_certificate',
+      name: 'Food handler certificate',
+      fileUrl: input.foodHandlerCertificateUrl || null,
+      status: input.foodHandlerCertificateUrl ? 'uploaded' : 'pending',
+      uploadedAt: input.foodHandlerCertificateUrl ? new Date() : null,
+    },
+    {
+      restaurantId,
+      type: 'tax_identification',
+      name: 'Tax Identification Number',
+      documentNumber: input.taxIdentificationNumber || null,
+      status: input.taxIdentificationNumber ? 'uploaded' : 'pending',
+    },
+    {
+      restaurantId,
+      type: 'health_safety_permit',
+      name: 'Health and safety permit',
+      fileUrl: input.healthSafetyPermitUrl || null,
+      status: input.healthSafetyPermitUrl ? 'uploaded' : 'pending',
+      uploadedAt: input.healthSafetyPermitUrl ? new Date() : null,
+    },
+  ]
+
+  for (const document of documents) {
+    await database
+      .insert(vendorDocuments)
+      .values(document)
+      .onConflictDoUpdate({
+        target: [vendorDocuments.restaurantId, vendorDocuments.type],
+        set: {
+          name: document.name,
+          fileUrl: sql`coalesce(${document.fileUrl ?? null}, ${vendorDocuments.fileUrl})`,
+          documentNumber: sql`coalesce(${document.documentNumber ?? null}, ${vendorDocuments.documentNumber})`,
+          status: sql`case when ${vendorDocuments.status} = 'pending' and ${document.status} = 'uploaded' then 'uploaded'::vendor_document_status else ${vendorDocuments.status} end`,
+          uploadedAt: sql`coalesce(${document.uploadedAt ?? null}, ${vendorDocuments.uploadedAt})`,
+          updatedAt: new Date(),
+        },
+      })
+  }
+}
+
+async function selectAdminPayoutSettings() {
+  const [settings] = await database
+    .select({
+      frequency: adminPayoutSettings.frequency,
+      payoutTime: adminPayoutSettings.payoutTime,
+      minimumWithdrawal: adminPayoutSettings.minimumWithdrawal,
+      autoProcess: adminPayoutSettings.autoProcess,
+      autoDeductCommission: adminPayoutSettings.autoDeductCommission,
+    })
+    .from(adminPayoutSettings)
+    .where(eq(adminPayoutSettings.settingsKey, 'default'))
+    .limit(1)
+
+  return (
+    settings ?? {
+      frequency: 'Weekly',
+      payoutTime: '17:00',
+      minimumWithdrawal: 5000,
+      autoProcess: false,
+      autoDeductCommission: true,
+    }
+  )
+}
+
+async function selectRestaurantManager(vendorId: string) {
+  const members = await database
+    .select()
+    .from(restaurantMembers)
+    .where(eq(restaurantMembers.restaurantId, vendorId))
+
+  return chooseRestaurantManager(members)
+}
+
+async function ensureServiceArea(serviceAreaText: string) {
+  const [namePart, cityPart, statePart] = serviceAreaText
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const name = namePart || serviceAreaText.trim()
+  const city = cityPart || 'Ile-Ife'
+  const state = statePart || 'Osun'
+
+  const [existingArea] = await database
+    .select({ id: serviceAreas.id })
+    .from(serviceAreas)
+    .where(sql`lower(${serviceAreas.name}) = ${name.toLowerCase()}`)
+    .limit(1)
+
+  if (existingArea) return existingArea
+
+  const [createdArea] = await database
+    .insert(serviceAreas)
+    .values({ name, city, state, isActive: true })
+    .returning({ id: serviceAreas.id })
+
+  return createdArea
+}
+
+async function createUniqueRestaurantSlug(name: string) {
+  const baseSlug = slugify(name)
+  const [existingRestaurant] = await database
+    .select({ id: restaurants.id })
+    .from(restaurants)
+    .where(eq(restaurants.slug, baseSlug))
+    .limit(1)
+
+  if (!existingRestaurant) return baseSlug
+
+  return `${baseSlug}-${Date.now().toString(36)}`
+}
+
+function slugify(value: string) {
+  return (
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || `vendor-${Date.now().toString(36)}`
+  )
+}
+
+function createTemporaryPassword() {
+  return `Mando-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36)}`
 }
 
 function buildVendorStats(vendorRows: Awaited<ReturnType<typeof selectAdminVendors>>) {
@@ -857,4 +1517,13 @@ function sendInvalidAdminLogin(reply: FastifyReply) {
     error: 'invalid_credentials',
     message: 'Invalid admin email or password.',
   })
+}
+
+function isUniqueViolation(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === '23505'
+  )
 }

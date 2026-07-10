@@ -8,7 +8,9 @@ const uploadFolders = {
   customer_avatar: 'mando/customers/avatar',
   restaurant_logo: 'mando/restaurants/logo',
   restaurant_cover: 'mando/restaurants/cover',
+  menu_item_image: 'mando/restaurants/menu-items',
   combo_image: 'mando/combos',
+  vendor_document: 'mando/vendors/documents',
 } as const
 
 export type CloudinaryUploadType = keyof typeof uploadFolders
@@ -24,7 +26,7 @@ export function getCloudinaryConfig() {
     cloudName,
     apiKey,
     apiSecret,
-    uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+    uploadUrl: `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`,
   }
 }
 
