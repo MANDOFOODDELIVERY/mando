@@ -13,6 +13,7 @@ import { database } from '../db/client.js'
 import {
   authSessions,
   deliveries,
+  menuItems,
   orderIssues,
   orderItemComponents,
   orderItems,
@@ -21,11 +22,14 @@ import {
   payments,
   profiles,
   restaurantEarnings,
+  restaurantMembers,
   restaurants,
   riderProfiles,
   salesAgentProfiles,
+  serviceAreas,
   userRoles,
   users,
+  reviews,
 } from '../db/schema.js'
 
 const loginBodySchema = z.object({
@@ -35,6 +39,10 @@ const loginBodySchema = z.object({
 
 const orderParamsSchema = z.object({
   orderId: z.uuid(),
+})
+
+const vendorParamsSchema = z.object({
+  vendorId: z.uuid(),
 })
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -251,6 +259,35 @@ export async function adminRoutes(app: FastifyInstance) {
 
     return reply.status(200).send({ order: { ...order, items, timeline } })
   })
+
+  app.get('/vendors', async (_request, reply) => {
+    const vendorRows = await selectAdminVendors()
+
+    return reply.status(200).send({
+      stats: buildVendorStats(vendorRows),
+      vendors: vendorRows,
+    })
+  })
+
+  app.get('/vendors/:vendorId', async (request, reply) => {
+    const parsedParams = vendorParamsSchema.safeParse(request.params)
+    if (!parsedParams.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please choose a valid vendor.',
+      })
+    }
+
+    const vendor = await selectAdminVendorDetail(parsedParams.data.vendorId)
+    if (!vendor) {
+      return reply.status(404).send({
+        error: 'vendor_not_found',
+        message: 'Vendor not found.',
+      })
+    }
+
+    return reply.status(200).send({ vendor })
+  })
 }
 
 async function requireAdmin(cookieHeader: string | undefined, reply: FastifyReply) {
@@ -276,6 +313,254 @@ async function requireAdmin(cookieHeader: string | undefined, reply: FastifyRepl
   }
 
   return sessionContext
+}
+
+async function selectAdminVendors() {
+  const restaurantRows = await database
+    .select()
+    .from(restaurants)
+    .orderBy(desc(restaurants.createdAt))
+
+  if (!restaurantRows.length) return []
+
+  const restaurantIds = restaurantRows.map((restaurant) => restaurant.id)
+  const serviceAreaIds = restaurantRows.map((restaurant) => restaurant.serviceAreaId)
+
+  const [
+    serviceAreaRows,
+    memberRows,
+    orderRows,
+    reviewRows,
+    earningRows,
+  ] = await Promise.all([
+    serviceAreaIds.length
+      ? database.select().from(serviceAreas).where(inArray(serviceAreas.id, serviceAreaIds))
+      : [],
+    restaurantIds.length
+      ? database
+          .select()
+          .from(restaurantMembers)
+          .where(inArray(restaurantMembers.restaurantId, restaurantIds))
+      : [],
+    restaurantIds.length
+      ? database.select().from(orders).where(inArray(orders.restaurantId, restaurantIds))
+      : [],
+    restaurantIds.length
+      ? database.select().from(reviews).where(inArray(reviews.restaurantId, restaurantIds))
+      : [],
+    restaurantIds.length
+      ? database
+          .select()
+          .from(restaurantEarnings)
+          .where(inArray(restaurantEarnings.restaurantId, restaurantIds))
+      : [],
+  ])
+
+  const managerIds = memberRows
+    .filter((member) => ['owner', 'manager'].includes(member.membershipRole))
+    .map((member) => member.userId)
+  const [managerProfiles, managerUsers] = managerIds.length
+    ? await Promise.all([
+        database.select().from(profiles).where(inArray(profiles.userId, managerIds)),
+        database
+          .select({ id: users.id, email: users.email })
+          .from(users)
+          .where(inArray(users.id, managerIds)),
+      ])
+    : [[], []]
+
+  const serviceAreaById = new Map(serviceAreaRows.map((area) => [area.id, area]))
+  const membersByRestaurantId = groupBy(memberRows, (member) => member.restaurantId)
+  const ordersByRestaurantId = groupBy(orderRows, (order) => order.restaurantId)
+  const reviewsByRestaurantId = groupBy(reviewRows, (review) => review.restaurantId)
+  const earningsByRestaurantId = groupBy(earningRows, (earning) => earning.restaurantId)
+  const profileByUserId = new Map(managerProfiles.map((profile) => [profile.userId, profile]))
+  const userById = new Map(managerUsers.map((user) => [user.id, user]))
+
+  return restaurantRows.map((restaurant) => {
+    const area = serviceAreaById.get(restaurant.serviceAreaId)
+    const managerMember = chooseRestaurantManager(membersByRestaurantId.get(restaurant.id) ?? [])
+    const managerProfile = managerMember ? profileByUserId.get(managerMember.userId) : null
+    const managerUser = managerMember ? userById.get(managerMember.userId) : null
+    const vendorOrders = ordersByRestaurantId.get(restaurant.id) ?? []
+    const vendorReviews = reviewsByRestaurantId.get(restaurant.id) ?? []
+    const vendorEarnings = earningsByRestaurantId.get(restaurant.id) ?? []
+    const clientPrice = restaurant.minimumOrderAmount
+    const mandoPrice = calculateCommissionAmount(clientPrice, restaurant.platformCommissionBps)
+
+    return {
+      id: restaurant.id,
+      name: restaurant.name,
+      initials: initialsFromName(restaurant.name),
+      cuisine: restaurant.description ?? 'Restaurant vendor',
+      location: formatRestaurantLocation(restaurant.streetAddress, area),
+      status: mapVendorStatus(restaurant.status),
+      rawStatus: restaurant.status,
+      manager: {
+        name: managerProfile?.fullName ?? 'No manager assigned',
+        phone: managerProfile?.phone ?? restaurant.phone,
+        email: managerUser?.email ?? null,
+      },
+      orders: vendorOrders.length,
+      rating: averageRating(vendorReviews.map((review) => review.rating)),
+      clientPrice,
+      mandoPrice,
+      vendorPayout: sum(vendorEarnings.map((earning) => earning.netAmount)),
+      commissionAmount: sum(vendorEarnings.map((earning) => earning.platformFeeAmount)),
+      commissionRateBps: restaurant.platformCommissionBps,
+      address: restaurant.streetAddress,
+      phone: restaurant.phone,
+      onboardedAt: restaurant.onboardedAt,
+      isVerified: restaurant.isVerified,
+    }
+  })
+}
+
+async function selectAdminVendorDetail(vendorId: string) {
+  const vendorRows = await selectAdminVendors()
+  const vendor = vendorRows.find((row) => row.id === vendorId)
+  if (!vendor) return null
+
+  const [menuRows, orderRows] = await Promise.all([
+    database.select().from(menuItems).where(eq(menuItems.restaurantId, vendorId)),
+    database
+      .select({
+        id: orders.id,
+        orderNumber: orders.orderNumber,
+        status: orders.status,
+        totalAmount: orders.totalAmount,
+        createdAt: orders.createdAt,
+      })
+      .from(orders)
+      .where(eq(orders.restaurantId, vendorId))
+      .orderBy(desc(orders.createdAt))
+      .limit(8),
+  ])
+
+  return {
+    ...vendor,
+    documents: buildVendorDocuments(vendor),
+    menu: menuRows.map((item) => {
+      const mandoShare = calculateCommissionAmount(item.priceAmount, vendor.commissionRateBps)
+
+      return {
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        clientPrice: item.priceAmount,
+        mandoShare,
+        vendorShare: item.priceAmount - mandoShare,
+        status: item.isAvailable ? 'available' : 'unavailable',
+      }
+    }),
+    activity: orderRows.map((order) => ({
+      id: order.id,
+      title: `Order ${order.orderNumber}`,
+      detail: `${order.status.replaceAll('_', ' ')} - ${formatMoney(order.totalAmount)}`,
+      createdAt: order.createdAt,
+    })),
+  }
+}
+
+function buildVendorStats(vendorRows: Awaited<ReturnType<typeof selectAdminVendors>>) {
+  return {
+    total: vendorRows.length,
+    pendingApproval: vendorRows.filter((vendor) => vendor.rawStatus === 'draft').length,
+    suspended: vendorRows.filter((vendor) => vendor.rawStatus === 'paused').length,
+    inactive: vendorRows.filter((vendor) => vendor.rawStatus === 'archived').length,
+  }
+}
+
+function buildVendorDocuments(vendor: Awaited<ReturnType<typeof selectAdminVendors>>[number]) {
+  return [
+    {
+      id: `${vendor.id}-cac`,
+      name: 'CAC certificate',
+      status: vendor.isVerified ? 'verified' : 'pending',
+    },
+    {
+      id: `${vendor.id}-food-handler`,
+      name: 'Food handler certificate',
+      status: vendor.isVerified ? 'verified' : 'pending',
+    },
+    {
+      id: `${vendor.id}-tax`,
+      name: 'Tax certificate',
+      status: vendor.isVerified ? 'verified' : 'pending',
+    },
+  ]
+}
+
+function chooseRestaurantManager(
+  members: (typeof restaurantMembers.$inferSelect)[],
+) {
+  return (
+    members.find((member) => member.status === 'active' && member.membershipRole === 'owner') ??
+    members.find((member) => member.status === 'active' && member.membershipRole === 'manager') ??
+    members[0] ??
+    null
+  )
+}
+
+function mapVendorStatus(status: (typeof restaurants.$inferSelect)['status']) {
+  if (status === 'active') return 'active'
+  if (status === 'paused') return 'suspended'
+  if (status === 'archived') return 'inactive'
+  return 'pending approval'
+}
+
+function formatRestaurantLocation(
+  streetAddress: string,
+  serviceArea: (typeof serviceAreas.$inferSelect) | undefined,
+) {
+  if (!serviceArea) return streetAddress
+  return `${streetAddress}, ${serviceArea.name}`
+}
+
+function averageRating(ratings: number[]) {
+  if (!ratings.length) return null
+  return Number((sum(ratings) / ratings.length).toFixed(1))
+}
+
+function calculateCommissionAmount(amount: number, commissionRateBps: number) {
+  return Math.round(amount * (commissionRateBps / 10000))
+}
+
+function groupBy<T, TKey extends string>(
+  rows: T[],
+  getKey: (row: T) => TKey,
+) {
+  const grouped = new Map<TKey, T[]>()
+
+  for (const row of rows) {
+    const key = getKey(row)
+    grouped.set(key, [...(grouped.get(key) ?? []), row])
+  }
+
+  return grouped
+}
+
+function sum(values: number[]) {
+  return values.reduce((total, value) => total + value, 0)
+}
+
+function initialsFromName(name: string) {
+  return (
+    name
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || 'NA'
+  )
+}
+
+function formatMoney(amount: number) {
+  return new Intl.NumberFormat('en-NG', {
+    style: 'currency',
+    currency: 'NGN',
+    maximumFractionDigits: 0,
+  }).format(amount)
 }
 
 async function selectAdminOrders(limit: number, orderId?: string) {
