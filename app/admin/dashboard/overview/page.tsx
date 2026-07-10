@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import StatsCard from "@/components/cards/StatsCard";
 import {
@@ -171,19 +172,19 @@ const AdminOverview = () => {
       </p>
 
       <div className="mt-10 grid grid-cols-5 gap-3 pr-8">
-        {overviewStats.map((item) => (
-          <StatsCard key={item.id} {...item} />
-        ))}
+        {loading
+          ? Array.from({ length: 5 }).map((_, index) => <StatSkeleton key={index} />)
+          : overviewStats.map((item) => <StatsCard key={item.id} {...item} />)}
       </div>
 
       <div className="mt-10 grid grid-cols-3 gap-6 pr-8">
-        <div className="rounded-lg bg-white p-3">
+        <div className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-[13px] font-semibold">Quick Stats</h2>
             <GreenDot />
           </div>
           <div className="mt-6 space-y-3">
-            {quickStats.map((item) => (
+            {loading ? <StackSkeleton rows={4} /> : quickStats.map((item) => (
               <div key={item.id} className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
                   {item.dot}
@@ -195,7 +196,7 @@ const AdminOverview = () => {
           </div>
         </div>
 
-        <div className="rounded-lg bg-white p-3">
+        <div className="rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-[12px] font-semibold text-[#101828]">Orders Overview</h2>
             <select
@@ -209,22 +210,26 @@ const AdminOverview = () => {
             </select>
           </div>
           <div className="mt-8 flex h-32 items-end gap-3">
-            {[data?.quickStats.totalOrders ?? 0, data?.quickStats.totalDeliveries ?? 0, data?.quickStats.paymentIssueCount ?? 0].map((value, index) => (
-              <div key={index} className="flex flex-1 flex-col items-center gap-2">
-                <div
-                  className="w-full rounded-t-lg bg-[#FFB900]"
-                  style={{ height: `${Math.max(16, Math.min(120, value * 8))}px` }}
-                />
-                <span className="text-[10px] text-[#99A1AF]">{["Orders", "Delivered", "Issues"][index]}</span>
-              </div>
-            ))}
+            {loading ? (
+              <ChartSkeleton />
+            ) : (
+              [data?.quickStats.totalOrders ?? 0, data?.quickStats.totalDeliveries ?? 0, data?.quickStats.paymentIssueCount ?? 0].map((value, index) => (
+                <div key={index} className="flex flex-1 flex-col items-center gap-2">
+                  <div
+                    className="w-full rounded-t-lg bg-[#FFB900]"
+                    style={{ height: `${Math.max(16, Math.min(120, value * 8))}px` }}
+                  />
+                  <span className="text-[10px] text-[#99A1AF]">{["Orders", "Delivered", "Issues"][index]}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
         <div className="space-y-4">
-          <div className="space-y-3 rounded-lg bg-white p-3">
+          <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
             <h2 className="text-[12px] font-semibold">System Status</h2>
-            {systemStatus.map((item) => (
+            {loading ? <StackSkeleton rows={4} /> : systemStatus.map((item) => (
               <div className="flex items-center justify-between" key={item.id}>
                 <p className="text-[10px] text-[#4A5565]">{item.title}</p>
                 <p className={`rounded-lg p-2 text-[10px] font-semibold ${item.isBad ? "bg-[#FFE2E2] text-[#EF4444]" : "bg-[#DCFCE7] text-[#10B981]"}`}>
@@ -234,9 +239,9 @@ const AdminOverview = () => {
             ))}
           </div>
 
-          <div className="space-y-3 rounded-lg bg-white p-3">
+          <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
             <h2 className="text-[12px] font-semibold">Pending Actions</h2>
-            {pendingActions.map((item) => (
+            {loading ? <StackSkeleton rows={3} /> : pendingActions.map((item) => (
               <div className="flex items-center justify-between" key={item.id}>
                 <div className="flex items-center space-x-3">
                   <div className={item.iconColor}>{item.icon}</div>
@@ -251,6 +256,7 @@ const AdminOverview = () => {
 
       <div className="mt-10 grid grid-cols-3 gap-6 pr-8">
         <TableCard title="Recent Orders" columns={["Order ID", "Customer", "Restaurant", "Amount"]}>
+          {loading ? <TableSkeleton columns={4} rows={5} /> : null}
           {(data?.recentOrders ?? []).map((order) => (
             <div key={order.id} className="grid grid-cols-4 gap-6 px-2 py-2 text-[10px] text-[#99A1AF]">
               <p>{order.orderNumber}</p>
@@ -262,6 +268,7 @@ const AdminOverview = () => {
         </TableCard>
 
         <TableCard title="Top Vendors" columns={["Vendor", "Orders", "Revenue", "Rating"]}>
+          {loading ? <TableSkeleton columns={4} rows={5} /> : null}
           {(data?.topVendors ?? []).map((vendor) => (
             <div key={vendor.id} className="grid grid-cols-4 gap-6 px-2 py-2 text-[10px] text-[#99A1AF]">
               <p>{vendor.name}</p>
@@ -275,9 +282,11 @@ const AdminOverview = () => {
           ))}
         </TableCard>
 
-        <div className="space-y-3 rounded-lg bg-white p-3">
+        <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
           <h2 className="text-[12px] font-semibold">Commonly Disputed</h2>
-          {(data?.disputes ?? []).length === 0 ? (
+          {loading ? (
+            <StackSkeleton rows={4} />
+          ) : (data?.disputes ?? []).length === 0 ? (
             <p className="text-[10px] text-[#99A1AF]">No disputes yet.</p>
           ) : (
             data?.disputes.map((issue) => (
@@ -298,16 +307,86 @@ const AdminOverview = () => {
 
 function TableCard({ title, columns, children }: { title: string; columns: string[]; children: React.ReactNode }) {
   return (
-    <div className="space-y-3 rounded-lg bg-white p-3">
+    <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
       <div className="flex justify-between">
         <h2 className="text-[12px] font-semibold">{title}</h2>
       </div>
-      <div className="grid grid-cols-4 gap-6 bg-gray-100 p-2 text-[10px] text-[#99A1AF]">
+      <div className="grid grid-cols-4 gap-6 rounded-lg bg-gray-50 p-3 text-[10px] font-semibold text-[#99A1AF]">
         {columns.map((column) => <p key={column}>{column}</p>)}
       </div>
       {children}
     </div>
   );
+}
+
+function StatSkeleton() {
+  return (
+    <div className="min-w-[174px] space-y-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+      <div className="flex justify-between">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-7 w-7 rounded-full" />
+      </div>
+      <Skeleton className="h-6 w-12" />
+      <Skeleton className="h-3 w-24" />
+    </div>
+  );
+}
+
+function StackSkeleton({ rows }: { rows: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={index} className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-3 w-3 rounded-full" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <Skeleton className="h-6 w-16" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function TableSkeleton({ columns, rows }: { columns: number; rows: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <div
+          key={rowIndex}
+          className="grid gap-6 px-2 py-2"
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: columns }).map((__, columnIndex) => (
+            <Skeleton key={columnIndex} className="h-4 w-full" />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ChartSkeleton() {
+  return (
+    <>
+      {[48, 96, 64].map((height, index) => (
+        <div key={index} className="flex flex-1 flex-col items-center gap-2">
+          <Skeleton className="w-full rounded-t-lg" style={{ height }} />
+          <Skeleton className="h-3 w-14" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function Skeleton({
+  className = "",
+  style,
+}: {
+  className?: string;
+  style?: CSSProperties;
+}) {
+  return <div style={style} className={`animate-pulse rounded-md bg-gray-200/80 ${className}`} />;
 }
 
 function formatCurrency(amount: number) {

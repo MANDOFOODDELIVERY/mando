@@ -19,6 +19,8 @@ import {
   orderItems,
   orderStatusEvents,
   orders,
+  payoutAccounts,
+  payoutRequests,
   payments,
   profiles,
   restaurantEarnings,
@@ -269,6 +271,12 @@ export async function adminRoutes(app: FastifyInstance) {
     })
   })
 
+  app.get('/vendors/commissions', async (_request, reply) => {
+    const data = await selectAdminVendorCommissions()
+
+    return reply.status(200).send(data)
+  })
+
   app.get('/vendors/:vendorId', async (request, reply) => {
     const parsedParams = vendorParamsSchema.safeParse(request.params)
     if (!parsedParams.success) {
@@ -459,6 +467,97 @@ async function selectAdminVendorDetail(vendorId: string) {
       detail: `${order.status.replaceAll('_', ' ')} - ${formatMoney(order.totalAmount)}`,
       createdAt: order.createdAt,
     })),
+  }
+}
+
+async function selectAdminVendorCommissions() {
+  const [vendorRows, requestRows] = await Promise.all([
+    selectAdminVendors(),
+    database
+      .select({
+        id: payoutRequests.id,
+        restaurantId: payoutRequests.restaurantId,
+        payoutAccountId: payoutRequests.payoutAccountId,
+        amount: payoutRequests.amount,
+        status: payoutRequests.status,
+        requestedAt: payoutRequests.requestedAt,
+        type: payoutRequests.type,
+      })
+      .from(payoutRequests)
+      .where(eq(payoutRequests.type, 'restaurant_earnings'))
+      .orderBy(desc(payoutRequests.requestedAt)),
+  ])
+
+  const requestRestaurantIds = requestRows
+    .map((request) => request.restaurantId)
+    .filter((restaurantId): restaurantId is string => Boolean(restaurantId))
+  const accountIds = requestRows.map((request) => request.payoutAccountId)
+
+  const [restaurantRows, accountRows, orderRows, earningRows] = await Promise.all([
+    requestRestaurantIds.length
+      ? database.select().from(restaurants).where(inArray(restaurants.id, requestRestaurantIds))
+      : [],
+    accountIds.length
+      ? database.select().from(payoutAccounts).where(inArray(payoutAccounts.id, accountIds))
+      : [],
+    requestRestaurantIds.length
+      ? database.select().from(orders).where(inArray(orders.restaurantId, requestRestaurantIds))
+      : [],
+    requestRestaurantIds.length
+      ? database
+          .select()
+          .from(restaurantEarnings)
+          .where(inArray(restaurantEarnings.restaurantId, requestRestaurantIds))
+      : [],
+  ])
+
+  const restaurantById = new Map(restaurantRows.map((restaurant) => [restaurant.id, restaurant]))
+  const accountById = new Map(accountRows.map((account) => [account.id, account]))
+  const ordersByRestaurantId = groupBy(orderRows, (order) => order.restaurantId)
+  const earningsByRestaurantId = groupBy(earningRows, (earning) => earning.restaurantId)
+
+  return {
+    restaurants: vendorRows.map((vendor) => ({
+      id: vendor.id,
+      name: vendor.name,
+      commissionRateBps: vendor.commissionRateBps,
+      status: vendor.status,
+    })),
+    payoutSettings: {
+      frequency: 'Weekly',
+      payoutTime: '17:00',
+      minimumWithdrawal: 5000,
+      autoProcess: false,
+    },
+    withdrawalRequests: requestRows.map((request) => {
+      const restaurant = request.restaurantId ? restaurantById.get(request.restaurantId) : null
+      const vendorOrders = request.restaurantId
+        ? ordersByRestaurantId.get(request.restaurantId) ?? []
+        : []
+      const vendorEarnings = request.restaurantId
+        ? earningsByRestaurantId.get(request.restaurantId) ?? []
+        : []
+      const clientPaid = sum(vendorEarnings.map((earning) => earning.grossAmount))
+      const mandoCut = sum(vendorEarnings.map((earning) => earning.platformFeeAmount))
+      const account = accountById.get(request.payoutAccountId)
+
+      return {
+        id: request.id,
+        vendor: restaurant?.name ?? 'Restaurant vendor',
+        orders: vendorOrders.length,
+        clientPaid,
+        mandoCut,
+        vendorAmount: request.amount,
+        paymentMethod: account
+          ? `${account.bankCode} • ${account.accountNumberLast4}`
+          : 'Bank transfer',
+        payoutDetails: account
+          ? `${account.accountName} • ****${account.accountNumberLast4}`
+          : 'No payout account details',
+        requestDate: request.requestedAt,
+        status: request.status,
+      }
+    }),
   }
 }
 

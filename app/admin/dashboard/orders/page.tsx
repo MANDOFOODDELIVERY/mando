@@ -150,14 +150,14 @@ const AdminOrdersPage = () => {
       </p>
 
       <div className="mt-10 grid grid-cols-5 gap-3 pr-8">
-        {overviewStats.map((item) => (
-          <StatsCard key={item.id} {...item} />
-        ))}
+        {loading
+          ? Array.from({ length: 5 }).map((_, index) => <StatSkeleton key={index} />)
+          : overviewStats.map((item) => <StatsCard key={item.id} {...item} />)}
       </div>
 
       <div className={`mt-10 grid gap-5 pr-8 ${selectedOrder ? "grid-cols-[1fr_320px]" : "grid-cols-1"}`}>
-        <div className="space-y-3 rounded-lg bg-white p-3">
-          <div className="grid grid-cols-9 gap-6 bg-gray-100 p-2 text-[10px] text-[#99A1AF]">
+        <div className="space-y-3 rounded-xl border border-gray-100 bg-white p-3 shadow-sm">
+          <div className="grid grid-cols-9 gap-6 rounded-lg bg-gray-50 p-3 text-[10px] font-semibold text-[#99A1AF]">
             <p>Order ID</p>
             <p>Customer</p>
             <p>Restaurant</p>
@@ -169,7 +169,7 @@ const AdminOrdersPage = () => {
             <p>Action</p>
           </div>
 
-          {(data?.orders ?? []).map((order) => (
+          {loading ? <TableSkeleton columns={9} rows={7} /> : (data?.orders ?? []).map((order) => (
             <button
               key={order.id}
               type="button"
@@ -192,7 +192,7 @@ const AdminOrdersPage = () => {
         </div>
 
         {selectedOrder ? (
-          <aside className="sticky top-24 h-fit rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <aside className="sticky top-24 h-fit rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[10px] text-[#99A1AF]">Order</p>
@@ -315,6 +315,41 @@ function StatusPill({ label }: { label: string }) {
       {normalized}
     </p>
   );
+}
+
+function StatSkeleton() {
+  return (
+    <div className="min-w-[174px] space-y-4 rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+      <div className="flex justify-between">
+        <Skeleton className="h-3 w-20" />
+        <Skeleton className="h-7 w-7 rounded-full" />
+      </div>
+      <Skeleton className="h-6 w-12" />
+      <Skeleton className="h-3 w-24" />
+    </div>
+  );
+}
+
+function TableSkeleton({ columns, rows }: { columns: number; rows: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <div
+          key={rowIndex}
+          className="grid items-center gap-6 rounded-lg px-2 py-3"
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: columns }).map((__, columnIndex) => (
+            <Skeleton key={columnIndex} className="h-4 w-full" />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-md bg-gray-200/80 ${className}`} />;
 }
 
 function ContactRow({
