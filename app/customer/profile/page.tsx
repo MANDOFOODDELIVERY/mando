@@ -154,6 +154,11 @@ export default function ProfilePage() {
   const [addresses, setAddresses] = useState<SavedAddress[]>([]);
   const [loadingAddresses, setLoadingAddresses] = useState(true);
   const [deletingAddressId, setDeletingAddressId] = useState<string | null>(null);
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+  const [editingAddressLabel, setEditingAddressLabel] = useState("");
+  const [editingAddressStreet, setEditingAddressStreet] = useState("");
+  const [editingAddressLandmark, setEditingAddressLandmark] = useState("");
+  const [savingAddressId, setSavingAddressId] = useState<string | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingBirthday, setSavingBirthday] = useState(false);
@@ -382,6 +387,70 @@ export default function ProfilePage() {
     }
   }
 
+  function startEditingAddress(address: SavedAddress) {
+    setEditingAddressId(address.id);
+    setEditingAddressLabel(address.label);
+    setEditingAddressStreet(address.streetAddress);
+    setEditingAddressLandmark(address.landmark ?? "");
+  }
+
+  function cancelEditingAddress() {
+    setEditingAddressId(null);
+    setEditingAddressLabel("");
+    setEditingAddressStreet("");
+    setEditingAddressLandmark("");
+  }
+
+  async function saveAddress(addressId: string) {
+    const trimmedStreet = editingAddressStreet.trim();
+
+    if (!trimmedStreet) {
+      showToast("Please enter the street address", "error");
+      return;
+    }
+
+    setSavingAddressId(addressId);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/customer/addresses/${addressId}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          label: editingAddressLabel.trim() || "Home",
+          streetAddress: trimmedStreet,
+          landmark: editingAddressLandmark.trim() || null,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to update address");
+      }
+
+      setAddresses((currentAddresses) =>
+        currentAddresses.map((address) =>
+          address.id === addressId
+            ? {
+                ...address,
+                label: editingAddressLabel.trim() || "Home",
+                streetAddress: trimmedStreet,
+                landmark: editingAddressLandmark.trim() || null,
+              }
+            : address,
+        ),
+      );
+      cancelEditingAddress();
+      showToast("Address updated successfully", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to update address", "error");
+    } finally {
+      setSavingAddressId(null);
+    }
+  }
+
   async function uploadAvatar(file: File) {
     if (!file.type.startsWith("image/")) {
       showToast("Please choose an image file", "error");
@@ -569,7 +638,7 @@ export default function ProfilePage() {
           )}
         </section>
 
-        <section className="mb-6">
+        <section className="mb-6 hidden">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-semibold text-[#141B34]">Birthday perks</h3>
@@ -648,7 +717,7 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        <section className="mb-6 hidden">
+        {/* <section className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-semibold text-[#141B34]">Recent orders</h3>
@@ -730,9 +799,9 @@ export default function ProfilePage() {
               );
             })}
           </div>
-        </section>
+        </section> */}
 
-        <section className="mb-6 hidden">
+        <section className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-semibold text-[#141B34]">Saved addresses</h3>
@@ -752,29 +821,81 @@ export default function ProfilePage() {
               <div className="space-y-3">
                 {addresses.map((address) => (
                   <div key={address.id} className="rounded-2xl border border-gray-200 bg-[#F9F9F9] p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-sm font-semibold text-[#141B34]">{address.label}</p>
-                          {address.isDefault ? (
-                            <span className="rounded-full bg-[#FFF7E0] px-2.5 py-1 text-[11px] font-semibold text-[#141B34]">
-                              Default
-                            </span>
+                    {editingAddressId === address.id ? (
+                      <div className="space-y-3">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <input
+                            value={editingAddressLabel}
+                            onChange={(event) => setEditingAddressLabel(event.target.value)}
+                            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm"
+                            placeholder="Label e.g. Home"
+                          />
+                          <input
+                            value={editingAddressLandmark}
+                            onChange={(event) => setEditingAddressLandmark(event.target.value)}
+                            className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm"
+                            placeholder="Landmark optional"
+                          />
+                        </div>
+                        <input
+                          value={editingAddressStreet}
+                          onChange={(event) => setEditingAddressStreet(event.target.value)}
+                          className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm"
+                          placeholder="Street address"
+                        />
+                        <p className="text-xs text-[#6B6B6B]">
+                          Service area stays as {address.serviceArea.name}. Use Add address if you need a different area.
+                        </p>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                          <button
+                            disabled={savingAddressId === address.id}
+                            onClick={() => saveAddress(address.id)}
+                            className="flex-1 rounded-2xl bg-[#141B34] px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                          >
+                            {savingAddressId === address.id ? "Saving..." : "Save address"}
+                          </button>
+                          <button
+                            disabled={savingAddressId === address.id}
+                            onClick={cancelEditingAddress}
+                            className="flex-1 rounded-2xl border border-gray-300 px-4 py-3 text-sm font-semibold text-[#141B34] disabled:opacity-60"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-sm font-semibold text-[#141B34]">{address.label}</p>
+                            {address.isDefault ? (
+                              <span className="rounded-full bg-[#FFF7E0] px-2.5 py-1 text-[11px] font-semibold text-[#141B34]">
+                                Default
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="mt-1 text-sm text-[#4D4D4D]">{formatAddress(address)}</p>
+                          {address.landmark ? (
+                            <p className="mt-1 text-xs text-[#6B6B6B]">{address.landmark}</p>
                           ) : null}
                         </div>
-                        <p className="mt-1 text-sm text-[#4D4D4D]">{formatAddress(address)}</p>
-                        {address.landmark ? (
-                          <p className="mt-1 text-xs text-[#6B6B6B]">{address.landmark}</p>
-                        ) : null}
+                        <div className="flex shrink-0 flex-col gap-2">
+                          <button
+                            onClick={() => startEditingAddress(address)}
+                            className="rounded-xl border border-gray-300 px-3 py-2 text-xs font-semibold text-[#141B34]"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            disabled={deletingAddressId === address.id}
+                            onClick={() => deleteAddress(address.id)}
+                            className="rounded-xl border border-[#E53E3E] px-3 py-2 text-xs font-semibold text-[#E53E3E] disabled:opacity-60"
+                          >
+                            {deletingAddressId === address.id ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
                       </div>
-                      <button
-                        disabled={deletingAddressId === address.id}
-                        onClick={() => deleteAddress(address.id)}
-                        className="rounded-xl border border-[#E53E3E] px-3 py-2 text-xs font-semibold text-[#E53E3E] disabled:opacity-60"
-                      >
-                        {deletingAddressId === address.id ? "Deleting..." : "Delete"}
-                      </button>
-                    </div>
+                    )}
                   </div>
                 ))}
               </div>

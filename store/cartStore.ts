@@ -8,6 +8,8 @@ export type CartItem = {
   comboName: string;
   quantity: number;
   price: number; // unit price
+  customRestaurantId?: string;
+  isCustomCombo?: boolean;
   components?: CartItemComponent[];
 };
 

@@ -203,14 +203,27 @@ const CartPage = () => {
         credentials: "include",
         body: JSON.stringify({
           paymentMethod: "card",
-          items: items.map((item) => ({
-            comboId: item.id,
-            quantity: item.quantity,
-            components: item.components?.map((component) => ({
+          items: items.map((item) => {
+            const components = item.components?.map((component) => ({
               menuItemId: component.menuItemId,
               quantity: component.quantity,
-            })),
-          })),
+            }));
+
+            if (item.isCustomCombo && item.customRestaurantId) {
+              return {
+                restaurantId: item.customRestaurantId,
+                comboName: item.comboName,
+                quantity: item.quantity,
+                components,
+              };
+            }
+
+            return {
+              comboId: item.id,
+              quantity: item.quantity,
+              components,
+            };
+          }),
         }),
       });
 

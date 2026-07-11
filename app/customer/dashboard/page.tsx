@@ -18,7 +18,7 @@ import useNotificationStore from "@/store/notificationStore";
 const API_BASE_URL =
   (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000").replace(/\/+$/, "");
 const SUPPORT_WHATSAPP_URL =
-  "https://wa.me/2349164716562?text=%2B2349164716562";
+  `https://wa.me/2349164716562?text=${encodeURIComponent("Hi Mando Support, I need help with")}`;
 
 type SavedAddress = {
   id: string;
@@ -254,9 +254,10 @@ const Dashboard = () => {
         rel="noreferrer"
         aria-label="Chat with customer support"
         title="Customer support"
-        className="fixed bottom-24 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-[#25D366] text-white shadow-[0_14px_30px_rgba(37,211,102,0.35)]"
+        className="fixed bottom-24 right-5 z-40 flex items-center gap-2 rounded-full bg-[#25D366] px-4 py-3 text-white shadow-[0_14px_30px_rgba(37,211,102,0.35)]"
       >
-        <FiMessageCircle className="h-7 w-7" />
+        <FiMessageCircle className="h-6 w-6" />
+        <span className="text-sm font-semibold">Help</span>
       </a>
 
       <BottomNav />
