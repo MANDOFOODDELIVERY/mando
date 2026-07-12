@@ -38,6 +38,41 @@ export default function PaymentProcessingPage() {
     let cancelled = false;
     let attempts = 0;
     const maxAttempts = 30;
+    let verifyAttempted = false;
+
+    async function confirmPayment(orderNumberFromApi?: string) {
+      clearCart();
+      showToast("Payment confirmed. Your order has been sent to the restaurant.", "success");
+
+      const params = new URLSearchParams({ orderId: activeOrderId });
+      const confirmedOrderNumber = orderNumberFromApi ?? orderNumber;
+      if (confirmedOrderNumber) params.set("orderNumber", confirmedOrderNumber);
+
+      router.replace(`/customer/cart/payment-success?${params.toString()}`);
+    }
+
+    async function verifyPaymentFallback() {
+      if (verifyAttempted || cancelled) return false;
+
+      verifyAttempted = true;
+      setPollingStatus("Confirming payment...");
+
+      const response = await fetch(`${API_BASE_URL}/customer/payments/checkout/${activeOrderId}/verify`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!response.ok) return false;
+
+      const body = (await response.json().catch(() => null)) as
+        | { order?: { orderNumber?: string } }
+        | null;
+
+      if (cancelled) return true;
+
+      await confirmPayment(body?.order?.orderNumber);
+      return true;
+    }
 
     async function pollOrderPayment() {
       attempts += 1;
@@ -64,20 +99,17 @@ export default function PaymentProcessingPage() {
         const paymentStatus = latestPayment?.status;
 
         if (paymentStatus === "verified" || body.order.status !== "pending_payment") {
-          clearCart();
-          showToast("Payment confirmed. Your order has been sent to the restaurant.", "success");
-
-          const params = new URLSearchParams({ orderId: activeOrderId });
-          const confirmedOrderNumber = body.order.orderNumber ?? orderNumber;
-          if (confirmedOrderNumber) params.set("orderNumber", confirmedOrderNumber);
-
-          router.replace(`/customer/cart/payment-success?${params.toString()}`);
+          await confirmPayment(body.order.orderNumber);
           return;
         }
 
         if (["failed", "cancelled", "refunded"].includes(paymentStatus ?? "")) {
           showToast("Payment was not completed. Please try again.", "error");
           router.replace("/customer/cart/payment");
+          return;
+        }
+
+        if (attempts >= 2 && (await verifyPaymentFallback())) {
           return;
         }
 

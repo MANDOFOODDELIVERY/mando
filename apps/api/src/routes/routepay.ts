@@ -104,12 +104,12 @@ async function initiateHostedCheckout(
           })
           .where(eq(payments.orderId, order.id))
 
-        await tx.insert(orderStatusEvents).values({
-          orderId: order.id,
-          status: 'pending_payment',
-          actorUserId: sessionContext.userId,
-          note: 'Payment initiated.',
-        })
+      await tx.insert(orderStatusEvents).values({
+        orderId: order.id,
+        status: 'pending_payment',
+        actorUserId: sessionContext.userId,
+          note: 'Payment processing.',
+      })
       })
 
       return reply.status(200).send({
@@ -185,7 +185,7 @@ async function verifyCheckoutManually(
 
   await finalizePaidOrder(order, {
     actorUserId: sessionContext.userId,
-    note: 'Payment manually verified',
+    note: 'Payment confirmed.',
   })
 
   return reply.status(200).send({
@@ -263,7 +263,7 @@ async function handleRoutePayWebhook(
 
   if (success) {
     await finalizePaidOrder(payment, {
-      note: 'Payment confirmed by RoutePay webhook',
+      note: 'Payment confirmed.',
     })
   } else if (failed && payment.paymentStatus !== 'verified') {
     const now = new Date()
@@ -433,11 +433,24 @@ function isAuthorizedRoutePayWebhook(request: FastifyRequest) {
   )
 }
 
-function getPayloadString(payload: Record<string, unknown>, keys: string[]) {
+function getPayloadString(
+  payload: Record<string, unknown>,
+  keys: string[],
+): string | null {
   for (const key of keys) {
     const value = payload[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
     if (typeof value === 'number') return String(value)
+  }
+
+  for (const value of Object.values(payload)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+
+    const nestedValue: string | null = getPayloadString(
+      value as Record<string, unknown>,
+      keys,
+    )
+    if (nestedValue) return nestedValue
   }
 
   return null

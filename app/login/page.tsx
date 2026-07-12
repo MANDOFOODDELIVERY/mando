@@ -14,6 +14,7 @@ const API_BASE_URL =
 export default function Login() {
   const router = useRouter();
   const setAuth = useAuthStore((s) => s.setAuth);
+  const fetchCurrentUser = useAuthStore((s) => s.fetchCurrentUser);
   const showToast = useToastStore((s) => s.showToast);
   const [formData, setFormData] = useState({
     email: "",
@@ -92,6 +93,8 @@ export default function Login() {
     }
 
     try {
+      setAuth(null);
+      window.localStorage.removeItem("mando-cart");
       const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         headers: {
@@ -111,7 +114,12 @@ export default function Login() {
         throw new Error(result?.message ?? "Login failed. Please try again.");
       }
 
-      setAuth(result);
+      const freshAuth = await fetchCurrentUser("customer");
+
+      if (!freshAuth) {
+        throw new Error("Login succeeded, but your session could not be confirmed. Please try again.");
+      }
+
       showToast("Logged in successfully", "success");
       await new Promise((resolve) => window.setTimeout(resolve, 1200));
       router.push("/customer/dashboard");

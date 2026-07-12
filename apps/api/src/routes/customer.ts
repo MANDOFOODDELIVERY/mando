@@ -342,22 +342,33 @@ export async function customerRoutes(app: FastifyInstance) {
       .where(eq(addresses.userId, sessionContext.userId))
       .limit(1)
 
-    const existingAddresses = await database
-      .select({ id: addresses.id })
-      .from(addresses)
-      .where(eq(addresses.userId, sessionContext.userId))
-      .limit(MAX_CUSTOMER_ADDRESSES)
-
-    if (existingAddresses.length >= MAX_CUSTOMER_ADDRESSES) {
-      return reply.status(409).send({
-        error: 'address_limit_reached',
-        message: 'You can save up to 3 delivery addresses.',
-      })
-    }
-
-    const shouldBeDefault = body.isDefault ?? !existingAddress
+    const shouldBeDefault = true
 
     const createdAddress = await database.transaction(async (tx) => {
+      if (existingAddress) {
+        const [address] = await tx
+          .update(addresses)
+          .set({
+            serviceAreaId: body.serviceAreaId,
+            label: body.label,
+            streetAddress: body.streetAddress,
+            landmark: body.landmark ?? null,
+            latitude: body.latitude ?? null,
+            longitude: body.longitude ?? null,
+            isDefault: true,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(addresses.id, existingAddress.id),
+              eq(addresses.userId, sessionContext.userId),
+            ),
+          )
+          .returning(addressReturnColumns)
+
+        return address
+      }
+
       if (shouldBeDefault) {
         await tx
           .update(addresses)
@@ -1659,11 +1670,76 @@ function serializeOrderDetail(
       lineTotalAmount: item.lineTotalAmount,
       components: componentsByOrderItemId.get(item.id) ?? [],
     })),
-    timeline,
+    timeline: serializeCustomerTimeline(timeline, paymentRows),
     issues,
     payments: paymentRows,
     review,
   }
+}
+
+function serializeCustomerTimeline(
+  timeline: CustomerOrderTimelineEvent[],
+  paymentRows: CustomerOrderPayment[],
+) {
+  const paymentStatus = paymentRows[0]?.status
+  const paymentEvent =
+    paymentStatus === 'verified'
+      ? {
+          id: 'payment-confirmed',
+          status: 'paid',
+          note: 'Payment confirmed.',
+          createdAt: paymentRows[0]?.verifiedAt ?? paymentRows[0]?.paidAt ?? paymentRows[0]?.createdAt,
+        }
+      : paymentStatus
+        ? {
+            id: 'payment-processing',
+            status: 'pending_payment',
+            note: 'Payment processing.',
+            createdAt: paymentRows[0]?.createdAt ?? timeline[0]?.createdAt,
+          }
+        : null
+
+  const publicTimeline = timeline.map((event) => ({
+    ...event,
+    note: getCustomerTimelineNote(event.status, event.note),
+  }))
+
+  const timelineWithPayment = paymentEvent
+    ? [paymentEvent, ...publicTimeline]
+    : publicTimeline
+
+  const uniqueEvents = new Map<string, (typeof timelineWithPayment)[number]>()
+
+  for (const event of timelineWithPayment) {
+    const key = `${event.status}:${event.note}`
+    if (!uniqueEvents.has(key)) uniqueEvents.set(key, event)
+  }
+
+  return Array.from(uniqueEvents.values()).sort(
+    (a, b) =>
+      new Date(a.createdAt ?? 0).getTime() - new Date(b.createdAt ?? 0).getTime(),
+  )
+}
+
+function getCustomerTimelineNote(status: string, note: string | null) {
+  if (note && !/routepay|webhook|manual/i.test(note)) return note
+
+  const labels: Record<string, string> = {
+    pending_payment: 'Payment processing.',
+    paid: 'Payment confirmed.',
+    awaiting_restaurant: 'Awaiting restaurant confirmation.',
+    restaurant_accepted: 'Restaurant accepted your order.',
+    preparing: 'Your meal is being prepared.',
+    ready_for_pickup: 'Your order is ready for rider pickup.',
+    assigned_to_rider: 'A rider has been assigned.',
+    picked_up: 'Rider picked up your order.',
+    on_the_way: 'Your order is on the way.',
+    delivered: 'Order delivered.',
+    cancelled: 'Order cancelled.',
+    payment_exception: 'Payment needs attention.',
+  }
+
+  return labels[status] ?? 'Order updated.'
 }
 
 function isCustomerCancellableOrderStatus(status: string) {

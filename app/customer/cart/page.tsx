@@ -14,6 +14,8 @@ const API_BASE_URL =
   (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000").replace(/\/+$/, "");
 const DELIVERY_FEE_AMOUNT = 400;
 const SERVICE_CHARGE_AMOUNT = 50;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type SavedAddress = {
   id: string;
@@ -85,6 +87,7 @@ const CartPage = () => {
   const setDeliveryAddress = useCartStore((s) => s.setDeliveryAddress);
   const setPhoneNumber = useCartStore((s) => s.setPhoneNumber);
   const setCheckoutOrder = useCartStore((s) => s.setCheckoutOrder);
+  const clearCart = useCartStore((s) => s.clear);
   const showToast = useToastStore((s) => s.showToast);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [inputPhone, setInputPhone] = useState(phoneNumber);
@@ -184,6 +187,19 @@ const CartPage = () => {
       return;
     }
 
+    const hasStaleCatalogItem = items.some(
+      (item) =>
+        !item.isCustomCombo &&
+        !item.customRestaurantId &&
+        !UUID_PATTERN.test(item.id),
+    );
+
+    if (hasStaleCatalogItem) {
+      clearCart();
+      showToast("Your cart had old items. Please add the items again.", "error");
+      return;
+    }
+
     setStartingPayment(true);
     const checkoutWindow =
       typeof window !== "undefined" ? window.open("about:blank", "mando_checkout") : null;
@@ -233,7 +249,13 @@ const CartPage = () => {
         | null;
 
       if (!orderResponse.ok || !orderData || !("order" in orderData)) {
-        throw new Error(getResponseMessage(orderData) ?? "Unable to create order");
+        const message = getResponseMessage(orderData);
+
+        if (message?.toLowerCase().includes("unavailable")) {
+          clearCart();
+        }
+
+        throw new Error(message ?? "Unable to create order");
       }
 
       setCheckoutOrder(orderData.order);

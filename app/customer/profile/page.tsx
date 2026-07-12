@@ -106,35 +106,6 @@ function formatAddress(address: SavedAddress) {
   return `${address.streetAddress}, ${address.serviceArea.name}`;
 }
 
-function formatNaira(amount: number) {
-  return `₦${amount.toLocaleString()}`;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-NG", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(value));
-}
-
-function getOrderStatusLabel(status: string) {
-  return status
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function getOrderStepIndex(status: string) {
-  if (status === "cancelled" || status === "refunded") return -1;
-  if (status === "pending_payment" || status === "paid") return 0;
-  if (status === "awaiting_restaurant" || status === "restaurant_accepted") return 1;
-  if (status === "preparing" || status === "ready_for_pickup") return 2;
-  if (status === "on_the_way") return 3;
-  if (status === "delivered") return 4;
-  return 0;
-}
-
 export default function ProfilePage() {
   const router = useRouter();
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -638,7 +609,7 @@ export default function ProfilePage() {
           )}
         </section>
 
-        <section className="mb-6 hidden">
+        <section className="mb-6">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-semibold text-[#141B34]">Birthday perks</h3>
@@ -801,7 +772,7 @@ export default function ProfilePage() {
           </div>
         </section> */}
 
-        <section className="mb-6">
+        <section className="mb-6 hidden">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="text-base font-semibold text-[#141B34]">Saved addresses</h3>

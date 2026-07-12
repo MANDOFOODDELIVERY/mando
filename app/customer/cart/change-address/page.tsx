@@ -144,8 +144,8 @@ export default function ChangeAddressPage() {
         throw new Error(errorBody?.message ?? "Unable to save address");
       }
 
-      await response.json();
-      setDeliveryAddress(`${street.trim()}, ${selectedServiceArea?.name ?? "Selected location"}`);
+      const data = (await response.json()) as { address?: SavedAddress };
+      setDeliveryAddress(data.address ? formatAddress(data.address) : addressPreview || street.trim());
       showToast("Address saved successfully", "success");
       router.push("/customer/cart");
     } catch (error) {
