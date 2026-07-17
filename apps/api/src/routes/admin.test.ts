@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { chooseRestaurantManager } from './admin.ts'
+import { chooseRestaurantManager } from './admin.js'
 
 test('chooseRestaurantManager ignores invited members when no active owner or manager exists', () => {
   const members = [
