@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify'
-import { and, asc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { and, asc, eq, ilike, inArray, notInArray, or, sql } from 'drizzle-orm'
 
 import { getCurrentSessionContext } from '../auth/current-session.js'
 import { database } from '../db/client.js'
 import {
   addresses,
+  adminSettings,
   comboItems,
   combos,
   menuItems,
@@ -68,12 +69,13 @@ export async function catalogRoutes(app: FastifyInstance) {
   app.get('/combos', async (request, reply) => {
     const nearbyRequested = isNearbyCatalogRequest(request.query)
     const searchQuery = getCatalogSearchQuery(request.query)
+    const includePromoCombos = isPromoCatalogRequest(request.query)
     const serviceAreaId = nearbyRequested
       ? await getCustomerServiceAreaId(request.headers.cookie)
       : null
     const comboRows = nearbyRequested && !serviceAreaId
       ? []
-      : await getComboRows(serviceAreaId, undefined, searchQuery)
+      : await getComboRows(serviceAreaId, undefined, searchQuery, includePromoCombos)
 
     return reply.status(200).send({
       combos: comboRows.map(serializeComboSummary),
@@ -116,6 +118,15 @@ export async function catalogRoutes(app: FastifyInstance) {
       },
     })
   })
+}
+
+function isPromoCatalogRequest(query: unknown) {
+  return (
+    typeof query === 'object' &&
+    query !== null &&
+    'promo' in query &&
+    String((query as { promo?: unknown }).promo) === 'true'
+  )
 }
 
 function isNearbyCatalogRequest(query: unknown) {
@@ -215,7 +226,9 @@ function getRestaurantRows(
     .orderBy(asc(restaurants.name))
 }
 
-function getCombosForRestaurants(restaurantIds: string[]) {
+async function getCombosForRestaurants(restaurantIds: string[]) {
+  const promoComboIds = await getPromoComboIds()
+
   return database
     .select({
       id: combos.id,
@@ -238,6 +251,7 @@ function getCombosForRestaurants(restaurantIds: string[]) {
       and(
         eq(combos.isAvailable, true),
         inArray(combos.restaurantId, restaurantIds),
+        promoComboIds.length ? notInArray(combos.id, promoComboIds) : undefined,
       ),
     )
     .groupBy(combos.id, restaurants.id)
@@ -268,7 +282,10 @@ function getComboRows(
   serviceAreaId?: string | null,
   comboId?: string,
   searchQuery?: string,
+  includePromoCombos = false,
+  onlyComboIds?: string[],
 ) {
+  const includePromoCombo = Boolean(comboId)
   const conditions = [
     eq(combos.isAvailable, true),
     eq(restaurants.status, 'active' as const),
@@ -284,6 +301,10 @@ function getComboRows(
     )
   }
 
+  if (onlyComboIds?.length) {
+    conditions.push(inArray(combos.id, onlyComboIds))
+  }
+
   if (searchQuery) {
     const pattern = `%${searchQuery}%`
 
@@ -296,7 +317,12 @@ function getComboRows(
     )
   }
 
-  return database
+  return getPromoComboIds().then((promoComboIds) => {
+    if (!includePromoCombo && !includePromoCombos && promoComboIds.length > 0) {
+      conditions.push(notInArray(combos.id, promoComboIds))
+    }
+
+    return database
     .select({
       id: combos.id,
       slug: combos.slug,
@@ -317,6 +343,25 @@ function getComboRows(
     .where(and(...conditions))
     .groupBy(combos.id, restaurants.id)
     .orderBy(asc(restaurants.name), asc(combos.name))
+  })
+}
+
+async function getPromoComboRows() {
+  const promoComboIds = await getPromoComboIds()
+  if (!promoComboIds.length) return []
+  return getComboRows(undefined, undefined, undefined, true, promoComboIds)
+}
+async function getPromoComboIds() {
+  const [setting] = await database
+    .select({ value: adminSettings.value })
+    .from(adminSettings)
+    .where(eq(adminSettings.settingsKey, 'admin_promo_combo_ids'))
+    .limit(1)
+
+  const promoMap = (setting?.value ?? {}) as Record<string, boolean>
+  return Object.entries(promoMap)
+    .filter(([, isPromo]) => isPromo)
+    .map(([comboId]) => comboId)
 }
 
 function serializeRestaurantSummary(
@@ -371,3 +416,4 @@ function serializeComboSummary(
     },
   }
 }
+
