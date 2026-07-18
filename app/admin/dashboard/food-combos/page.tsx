@@ -9,6 +9,18 @@ const API_BASE_URL =
 const comboCategories = ["Rice", "Local dish", "Pasta", "Swallow", "Grill", "Breakfast", "Promo", "Other"];
 
 type ComboStatus = "active" | "draft" | "paused" | "sold out";
+type ComboCampaignStatus = "draft" | "scheduled" | "active" | "paused" | "expired";
+type ComboCampaign = {
+  id: string;
+  flyerUrl: string | null;
+  flyerPublicId: string | null;
+  content: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  status: ComboCampaignStatus;
+  stats: { viewed: number; clicked: number; shared: number };
+};
+
 type Combo = {
   id: string;
   name: string;
@@ -23,6 +35,7 @@ type Combo = {
   isPromoCombo: boolean;
   isFeatured: boolean;
   items: { name: string; quantity: string; extraPrice: number }[];
+  campaign: ComboCampaign | null;
 };
 
 type FoodCombosResponse = {
@@ -89,7 +102,8 @@ export default function AdminFoodCombosPage() {
   useEffect(() => {
     let mounted = true;
 
-    loadCombos()
+    void Promise.resolve()
+      .then(() => loadCombos())
       .finally(() => {
         if (mounted) setLoading(false);
       });
@@ -191,6 +205,36 @@ export default function AdminFoodCombosPage() {
                 ))}
               </div>
             </section>
+            <section className="mt-5 rounded-2xl border border-[#FFE7B8] bg-[#FFFBEB] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-semibold text-[#101828]">Sales campaign</h4>
+                  <p className="mt-1 text-[10px] text-[#927238]">Flyer and caption shown to sales agents.</p>
+                </div>
+                <span className="rounded-full bg-white px-2 py-1 text-[9px] font-semibold capitalize text-[#B7791F] shadow-sm">
+                  {selectedCombo.campaign?.status ?? "not set"}
+                </span>
+              </div>
+              {selectedCombo.campaign ? (
+                <div className="mt-4 space-y-3">
+                  {selectedCombo.campaign.flyerUrl ? <img src={selectedCombo.campaign.flyerUrl} alt="" className="h-32 w-full rounded-xl object-cover" /> : null}
+                  <p className="rounded-xl bg-white/80 p-3 text-[10px] leading-5 text-[#6A7282]">
+                    {selectedCombo.campaign.content || "No campaign caption yet."}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <MiniCard label="Starts" value={formatScheduleDate(selectedCombo.campaign.startsAt)} />
+                    <MiniCard label="Ends" value={formatScheduleDate(selectedCombo.campaign.endsAt)} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <MiniCard label="Viewed" value={String(selectedCombo.campaign.stats.viewed)} />
+                    <MiniCard label="Clicked" value={String(selectedCombo.campaign.stats.clicked)} />
+                    <MiniCard label="Shared" value={String(selectedCombo.campaign.stats.shared)} />
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-4 rounded-xl bg-white/80 p-3 text-[10px] text-[#927238]">No campaign has been configured for this combo yet.</p>
+              )}
+            </section>
             <div className="mt-5 grid grid-cols-2 gap-3">
               <Button icon={<FaEdit />} onClick={() => setComboModalMode("edit")}>Edit combo</Button>
               <Button variant="danger" icon={<FaTrash />} onClick={() => removeCombo(selectedCombo)}>Remove</Button>
@@ -206,13 +250,13 @@ export default function AdminFoodCombosPage() {
 }
 
 function ComboModal({ mode, combo, restaurants, serviceAreas, menuItemsByRestaurant, onClose, onSaved }: { mode: "add" | "edit"; combo: Combo | null; restaurants: string[]; serviceAreas: { id: string; name: string }[]; menuItemsByRestaurant: Record<string, string[]>; onClose: () => void; onSaved: () => void }) {
-  const [tab, setTab] = useState<"Basic info" | "Pricing" | "Availability" | "Items">("Basic info");
+  const [tab, setTab] = useState<"Basic info" | "Pricing" | "Availability" | "Items" | "Campaign">("Basic info");
   const [saving, setSaving] = useState(false);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [error, setError] = useState("");
   const [selectedRestaurant, setSelectedRestaurant] = useState(combo?.restaurant ?? restaurants[0] ?? "");
   const [itemRowCount, setItemRowCount] = useState(combo?.items.length ?? 1);
-  const tabs = ["Basic info", "Pricing", "Availability", "Items"] as const;
+  const tabs = ["Basic info", "Pricing", "Availability", "Items", "Campaign"] as const;
   const itemOptions = menuItemsByRestaurant[selectedRestaurant] ?? [];
   const baseItemSlots = combo?.items.length ? combo.items : [
     { name: "", quantity: "1", extraPrice: 0 },
@@ -228,6 +272,7 @@ function ComboModal({ mode, combo, restaurants, serviceAreas, menuItemsByRestaur
     setError("");
     try {
       const imageUrl = await uploadAdminImage(getSelectedFile(formData, "comboImage"), "combo_image", setProgress);
+      const campaignFlyerUrl = await uploadAdminImage(getSelectedFile(formData, "campaignFlyer"), "promo_banner", setProgress);
       const items = Array.from({ length: itemRowCount }, (_, index) => index)
         .map((index) => ({
           name: String(formData.get(`itemName${index}`) ?? "").trim(),
@@ -250,6 +295,14 @@ function ComboModal({ mode, combo, restaurants, serviceAreas, menuItemsByRestaur
           isFeatured: formData.get("isFeatured") === "Yes",
           isPromoCombo: formData.get("isPromoCombo") === "Yes",
           serviceArea: formData.get("serviceArea"),
+          campaign: {
+            flyerUrl: campaignFlyerUrl ?? combo?.campaign?.flyerUrl ?? null,
+            flyerPublicId: combo?.campaign?.flyerPublicId ?? null,
+            content: formData.get("campaignContent"),
+            startsAt: formData.get("campaignStartsAt") || null,
+            endsAt: formData.get("campaignEndsAt") || null,
+            status: formData.get("campaignStatus") || "draft",
+          },
           items,
         }),
       });
@@ -275,7 +328,7 @@ function ComboModal({ mode, combo, restaurants, serviceAreas, menuItemsByRestaur
           <button onClick={onClose} className="rounded-lg border border-gray-200 px-3 py-2 text-[10px] font-semibold text-[#6A7282]">Close</button>
         </div>
 
-        <div className="mt-5 grid grid-cols-4 gap-2 rounded-xl bg-gray-100 p-1">
+        <div className="mt-5 grid grid-cols-5 gap-2 rounded-xl bg-gray-100 p-1">
           {tabs.map((item) => (
             <button type="button" key={item} onClick={() => setTab(item)} className={`rounded-lg px-3 py-2 text-[10px] font-semibold ${tab === item ? "bg-white text-[#101828] shadow-sm" : "text-[#6A7282]"}`}>
               {item}
@@ -323,6 +376,19 @@ function ComboModal({ mode, combo, restaurants, serviceAreas, menuItemsByRestaur
                 </div>
               ))}
           </div>
+          <div className={tab === "Campaign" ? "space-y-4" : "hidden"}>
+              <div className="rounded-2xl border border-[#FFE7B8] bg-[#FFFBEB] p-4">
+                <p className="text-[11px] font-semibold text-[#101828]">Sales agent campaign</p>
+                <p className="mt-1 text-[10px] leading-5 text-[#927238]">Upload the flyer and caption sales agents will share. The agent-specific combo link is attached later by the sales dashboard.</p>
+              </div>
+              <FileUploadField label="Campaign flyer" name="campaignFlyer" currentUrl={combo?.campaign?.flyerUrl ?? undefined} progress={progress} />
+              <TextAreaField name="campaignContent" label="Campaign caption" defaultValue={combo?.campaign?.content ?? ""} placeholder="Write the caption sales agents should post with this flyer." />
+              <div className="grid grid-cols-3 gap-4">
+                <FormField name="campaignStartsAt" label="Starts at" type="datetime-local" defaultValue={formatDateTimeInput(combo?.campaign?.startsAt)} />
+                <FormField name="campaignEndsAt" label="Ends at" type="datetime-local" defaultValue={formatDateTimeInput(combo?.campaign?.endsAt)} />
+                <SelectField name="campaignStatus" label="Campaign status" options={["draft", "scheduled", "active", "paused", "expired"]} defaultValue={combo?.campaign?.status ?? "draft"} />
+              </div>
+          </div>
           {error ? <p className="mt-4 rounded-xl bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600">{error}</p> : null}
 
           <div className="mt-6 flex items-center justify-between border-t border-gray-100 pt-4">
@@ -343,7 +409,7 @@ function getSelectedFile(formData: FormData, name: string) {
 
 async function uploadAdminImage(
   file: File | null,
-  type: "combo_image",
+  type: "combo_image" | "promo_banner",
   onProgress?: (progress: UploadProgress) => void,
 ) {
   if (!file) return null;
@@ -451,6 +517,10 @@ function SelectField({ label, options, ...props }: React.SelectHTMLAttributes<HT
   return <label className="block"><span className="text-[10px] font-semibold text-[#6A7282]">{label}</span><select {...props} className="mt-2 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] outline-none focus:border-[#FE9A00] focus:ring-2 focus:ring-[#FE9A00]/10">{options.map((option, index) => <option key={`${option}-${index}`}>{option}</option>)}</select></label>;
 }
 
+function TextAreaField({ label, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string }) {
+  return <label className="block"><span className="text-[10px] font-semibold text-[#6A7282]">{label}</span><textarea {...props} className="mt-2 min-h-28 w-full resize-none rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-[11px] leading-5 outline-none focus:border-[#FE9A00] focus:ring-2 focus:ring-[#FE9A00]/10" /></label>;
+}
+
 function Button({ children, icon, variant = "primary", onClick, type = "button", disabled }: { children: React.ReactNode; icon?: React.ReactNode; variant?: "primary" | "secondary" | "danger"; onClick?: () => void; type?: "button" | "submit"; disabled?: boolean }) {
   const style = variant === "primary" ? "bg-[#FE9A00] text-white" : variant === "danger" ? "border border-red-200 bg-red-50 text-red-600" : "border border-gray-200 bg-white text-[#6A7282]";
   return <button type={type} disabled={disabled} onClick={onClick} className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold shadow-sm disabled:cursor-not-allowed disabled:opacity-60 ${style}`}>{icon}{children}</button>;
@@ -471,4 +541,20 @@ function parseComboItemQuantity(quantity: string) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+function formatScheduleDate(value: string | null | undefined) {
+  if (!value) return "Not scheduled";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not scheduled";
+  return new Intl.DateTimeFormat("en-NG", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
 
+function formatDateTimeInput(value: string | null | undefined) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
