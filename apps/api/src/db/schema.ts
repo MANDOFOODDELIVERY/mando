@@ -229,6 +229,19 @@ export const riderDocumentStatusEnum = pgEnum('rider_document_status', [
   'rejected',
 ])
 
+export const comboCampaignStatusEnum = pgEnum('combo_campaign_status', [
+  'draft',
+  'scheduled',
+  'active',
+  'paused',
+  'expired',
+])
+
+export const comboCampaignEventTypeEnum = pgEnum('combo_campaign_event_type', [
+  'viewed',
+  'clicked',
+  'shared',
+])
 export const users = pgTable(
   'users',
   {
@@ -700,6 +713,53 @@ export const comboItems = pgTable(
   ],
 )
 
+export const comboCampaigns = pgTable(
+  'combo_campaigns',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    comboId: uuid('combo_id')
+      .notNull()
+      .references(() => combos.id, { onDelete: 'cascade' }),
+    flyerUrl: text('flyer_url'),
+    flyerPublicId: text('flyer_public_id'),
+    content: text('content').notNull().default(''),
+    startsAt: timestampWithTimezone('starts_at'),
+    endsAt: timestampWithTimezone('ends_at'),
+    status: comboCampaignStatusEnum('status').notNull().default('draft'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    index('combo_campaigns_combo_id_index').on(table.comboId),
+    index('combo_campaigns_status_index').on(table.status),
+    index('combo_campaigns_schedule_index').on(table.startsAt, table.endsAt),
+  ],
+)
+
+export const comboCampaignEvents = pgTable(
+  'combo_campaign_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => comboCampaigns.id, { onDelete: 'cascade' }),
+    comboId: uuid('combo_id')
+      .notNull()
+      .references(() => combos.id, { onDelete: 'cascade' }),
+    salesAgentId: uuid('sales_agent_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    eventType: comboCampaignEventTypeEnum('event_type').notNull(),
+    channel: text('channel'),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index('combo_campaign_events_campaign_id_index').on(table.campaignId),
+    index('combo_campaign_events_combo_id_index').on(table.comboId),
+    index('combo_campaign_events_sales_agent_id_index').on(table.salesAgentId),
+    index('combo_campaign_events_type_index').on(table.eventType),
+  ],
+)
 export const orders = pgTable(
   'orders',
   {

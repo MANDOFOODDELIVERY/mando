@@ -15,6 +15,8 @@ import {
   adminPayoutSettings,
   adminSettings,
   authSessions,
+  comboCampaignEvents,
+  comboCampaigns,
   comboItems,
   combos,
   commissions,
@@ -237,6 +239,14 @@ const adminComboItemBodySchema = z.object({
   extraPrice: z.coerce.number().int().nonnegative().default(0),
 })
 
+const adminComboCampaignBodySchema = z.object({
+  flyerUrl: z.string().trim().nullable().optional(),
+  flyerPublicId: z.string().trim().nullable().optional(),
+  content: z.string().trim().optional(),
+  startsAt: z.string().trim().nullable().optional(),
+  endsAt: z.string().trim().nullable().optional(),
+  status: z.enum(['draft', 'scheduled', 'active', 'paused', 'expired']).default('draft'),
+})
 const adminComboBodySchema = z.object({
   name: z.string().trim().min(2),
   restaurant: z.string().trim().min(2),
@@ -250,6 +260,7 @@ const adminComboBodySchema = z.object({
   isFeatured: z.boolean().default(false),
   isPromoCombo: z.boolean().default(false),
   serviceArea: z.string().trim().optional(),
+  campaign: adminComboCampaignBodySchema.optional(),
   items: z.array(adminComboItemBodySchema).min(1),
 })
 
@@ -1297,6 +1308,40 @@ export async function adminRoutes(app: FastifyInstance) {
     return reply.status(200).send({ combo })
   })
 
+  app.get('/food-combos/:comboId/campaign', async (request, reply) => {
+    const parsedParams = comboParamsSchema.safeParse(request.params)
+    if (!parsedParams.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please provide a valid combo.',
+      })
+    }
+
+    const campaign = await selectAdminComboCampaign(parsedParams.data.comboId)
+    return reply.status(200).send({ campaign })
+  })
+
+  app.patch('/food-combos/:comboId/campaign', async (request, reply) => {
+    const parsedParams = comboParamsSchema.safeParse(request.params)
+    const parsedBody = adminComboCampaignBodySchema.safeParse(request.body)
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please provide valid campaign details.',
+      })
+    }
+
+    const [combo] = await database
+      .select({ id: combos.id })
+      .from(combos)
+      .where(eq(combos.id, parsedParams.data.comboId))
+      .limit(1)
+
+    if (!combo) return reply.status(404).send({ error: 'combo_not_found', message: 'Combo not found.' })
+
+    const campaign = await upsertAdminComboCampaign(parsedParams.data.comboId, parsedBody.data)
+    return reply.status(200).send({ campaign })
+  })
   app.delete('/food-combos/:comboId', async (request, reply) => {
     const parsedParams = comboParamsSchema.safeParse(request.params)
     if (!parsedParams.success) {
@@ -2250,7 +2295,7 @@ async function selectAdminFoodCombos() {
   ])
 
   const comboIds = comboRows.map((combo) => combo.id)
-  const [componentRows, orderItemRows] = await Promise.all([
+  const [componentRows, orderItemRows, campaignRows, campaignEventRows] = await Promise.all([
     comboIds.length
       ? database
           .select({
@@ -2267,14 +2312,27 @@ async function selectAdminFoodCombos() {
     comboIds.length
       ? database.select().from(orderItems).where(inArray(orderItems.comboId, comboIds))
       : [],
+    comboIds.length
+      ? database.select().from(comboCampaigns).where(inArray(comboCampaigns.comboId, comboIds))
+      : [],
+    comboIds.length
+      ? database
+          .select()
+          .from(comboCampaignEvents)
+          .where(inArray(comboCampaignEvents.comboId, comboIds))
+      : [],
   ])
   const componentsByComboId = groupBy(componentRows, (component) => component.comboId)
+  const campaignsByComboId = groupBy(campaignRows, (campaign) => campaign.comboId)
+  const campaignEventsByComboId = groupBy(campaignEventRows, (event) => event.comboId)
   const orderItemsByComboId = groupBy(
     orderItemRows.filter((item) => Boolean(item.comboId)),
     (item) => item.comboId ?? 'unknown',
   )
   const comboList = comboRows.map((combo) => {
     const orderItemsForCombo = orderItemsByComboId.get(combo.id) ?? []
+    const campaign = campaignsByComboId.get(combo.id)?.[0] ?? null
+    const campaignEvents = campaignEventsByComboId.get(combo.id) ?? []
     const margin = comboMandoPrices[combo.id] ?? calculateCommissionAmount(combo.priceAmount, combo.platformCommissionBps)
 
     return {
@@ -2290,6 +2348,22 @@ async function selectAdminFoodCombos() {
       status: comboStatusMap[combo.id] ?? (combo.isAvailable ? 'active' : 'sold out'),
       isFeatured: combo.isFeatured,
       isPromoCombo: Boolean(promoComboIds[combo.id]),
+      campaign: campaign
+        ? {
+            id: campaign.id,
+            flyerUrl: campaign.flyerUrl,
+            flyerPublicId: campaign.flyerPublicId,
+            content: campaign.content,
+            startsAt: campaign.startsAt,
+            endsAt: campaign.endsAt,
+            status: campaign.status,
+            stats: {
+              viewed: campaignEvents.filter((event) => event.eventType === 'viewed').length,
+              clicked: campaignEvents.filter((event) => event.eventType === 'clicked').length,
+              shared: campaignEvents.filter((event) => event.eventType === 'shared').length,
+            },
+          }
+        : null,
       items: (componentsByComboId.get(combo.id) ?? []).map((item) => ({
         name: item.menuItemName,
         quantity: `${item.quantity} portion${item.quantity === 1 ? '' : 's'}`,
@@ -2322,6 +2396,52 @@ async function selectAdminFoodComboDetail(comboId: string) {
   return data.combos.find((combo) => combo.id === comboId) ?? null
 }
 
+function parseOptionalDate(value: string | null | undefined) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+async function selectAdminComboCampaign(comboId: string) {
+  const [campaign] = await database
+    .select()
+    .from(comboCampaigns)
+    .where(eq(comboCampaigns.comboId, comboId))
+    .limit(1)
+
+  return campaign ?? null
+}
+
+async function upsertAdminComboCampaign(
+  comboId: string,
+  input: z.infer<typeof adminComboCampaignBodySchema> | undefined,
+) {
+  if (!input) return null
+
+  const values = {
+    comboId,
+    flyerUrl: input.flyerUrl || null,
+    flyerPublicId: input.flyerPublicId || null,
+    content: input.content ?? '',
+    startsAt: parseOptionalDate(input.startsAt),
+    endsAt: parseOptionalDate(input.endsAt),
+    status: input.status,
+    updatedAt: new Date(),
+  }
+
+  const existing = await selectAdminComboCampaign(comboId)
+  if (existing) {
+    const [campaign] = await database
+      .update(comboCampaigns)
+      .set(values)
+      .where(eq(comboCampaigns.id, existing.id))
+      .returning()
+    return campaign
+  }
+
+  const [campaign] = await database.insert(comboCampaigns).values(values).returning()
+  return campaign
+}
 async function createAdminFoodCombo(input: z.infer<typeof adminComboBodySchema>) {
   const [restaurant] = await database
     .select({
@@ -2356,6 +2476,7 @@ async function createAdminFoodCombo(input: z.infer<typeof adminComboBodySchema>)
   await setAdminComboMandoPrice(combo.id, input.mandoPrice)
   await setAdminComboStatus(combo.id, input.status)
   await setAdminComboCategory(combo.id, input.category || input.description || 'Combo')
+  await upsertAdminComboCampaign(combo.id, input.campaign)
   return selectAdminFoodComboDetail(combo.id)
 }
 
@@ -2402,6 +2523,7 @@ async function updateAdminFoodCombo(
   if (typeof input.mandoPrice === 'number') await setAdminComboMandoPrice(comboId, input.mandoPrice)
   if (input.status) await setAdminComboStatus(comboId, input.status)
   if (input.category || input.description) await setAdminComboCategory(comboId, input.category ?? input.description ?? 'Combo')
+  if (input.campaign) await upsertAdminComboCampaign(comboId, input.campaign)
   return selectAdminFoodComboDetail(comboId)
 }
 
