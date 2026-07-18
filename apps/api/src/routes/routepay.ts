@@ -15,6 +15,7 @@ import {
   users,
 } from '../db/schema.js'
 import { getRoutePayConfig } from '../config/routepay.js'
+import { buildWebUrl } from '../config/web-url.js'
 import { createRoutePayHostedPayment } from '../payments/routepay.js'
 
 const initiateBodySchema = z.object({
@@ -476,10 +477,6 @@ function isFailedRoutePayStatus(status: string | null) {
   )
 }
 
-function buildWebUrl(path: string) {
-  const origin = process.env.WEB_ORIGIN?.split(',')[0] ?? 'http://localhost:3000'
-  return `${origin}${path}`
-}
 
 function sendUnauthenticated(reply: FastifyReply) {
   return reply

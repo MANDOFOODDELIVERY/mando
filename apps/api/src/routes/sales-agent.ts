@@ -11,6 +11,7 @@ import {
   serializeSessionCookie,
   verifyPassword,
 } from '../auth/index.js'
+import { buildWebUrl } from '../config/web-url.js'
 import { database } from '../db/client.js'
 import {
   authSessions,
@@ -697,11 +698,6 @@ async function getShareableCombos(agentUserId: string) {
     campaignContent: combo.campaignContent,
     shareUrl: buildWebUrl(`/customer/featured-combos/${combo.id}?sa=${agentUserId}`),
   }))
-}
-
-function buildWebUrl(path: string) {
-  const origin = process.env.WEB_ORIGIN?.split(',')[0] ?? 'http://localhost:3000'
-  return `${origin}${path}`
 }
 
 function getUserNotifications(userId: string) {
