@@ -45,6 +45,7 @@ type Rider = {
   totalDeliveries: number;
   totalEarnings: number;
   completionRate: number;
+  riderCode: string;
   documents: RiderDocument[];
 };
 
@@ -295,6 +296,7 @@ export default function AdminRidersPage() {
             </div>
 
             <PanelSection title="Rider Information">
+              <DetailRow label="Rider code" value={selectedRider.riderCode} />
               <DetailRow label="Email address" value={selectedRider.email} />
               <DetailRow label="Phone number" value={selectedRider.phone} />
               <DetailRow label="Address" value={selectedRider.address} />

@@ -267,6 +267,7 @@ function getMenuItemsForRestaurant(restaurantId: string) {
       priceAmount: menuItems.priceAmount,
       imageUrl: menuItems.imageUrl,
       isAvailable: menuItems.isAvailable,
+      isSubItem: menuItems.isSubItem,
     })
     .from(menuItems)
     .where(

@@ -9,13 +9,16 @@ import {
   FaFileAlt,
   FaHistory,
   FaImage,
+  FaPen,
   FaPlus,
   FaRegBuilding,
   FaStore,
+  FaTrash,
   FaUtensils,
   FaWallet,
 } from "react-icons/fa";
 import StatsCard from "@/components/cards/StatsCard";
+import ConfirmationModal from "@/components/ConfirmationModal";
 import { useToastStore } from "@/store/toastStore";
 
 const API_BASE_URL =
@@ -127,6 +130,9 @@ const AdminVendorsPage = () => {
   const [loading, setLoading] = useState(true);
   const [suspendingVendorId, setSuspendingVendorId] = useState<string | null>(null);
   const [approvingVendorId, setApprovingVendorId] = useState<string | null>(null);
+  const [editMenuItem, setEditMenuItem] = useState<VendorMenuItem | null>(null);
+  const [deletingMenuItemId, setDeletingMenuItemId] = useState<string | null>(null);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState<VendorMenuItem | null>(null);
 
   async function loadVendors() {
     setLoading(true);
@@ -207,6 +213,35 @@ const AdminVendorsPage = () => {
       showToast(error instanceof Error ? error.message : "Unable to update vendor status", "error");
     } finally {
       setSuspendingVendorId(null);
+    }
+  }
+
+  async function deleteMenuItem(item: VendorMenuItem) {
+    if (!selectedVendor) return;
+
+    setDeletingMenuItemId(item.id);
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/admin/vendors/${selectedVendor.id}/menu-items/${item.id}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        },
+      );
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to delete menu item");
+      }
+
+      setConfirmDeleteItem(null);
+      void refreshSelectedVendor();
+      showToast("Menu item deleted successfully", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to delete menu item", "error");
+    } finally {
+      setDeletingMenuItemId(null);
     }
   }
 
@@ -412,7 +447,12 @@ const AdminVendorsPage = () => {
                 />
               ) : null}
               {activeTab === "Menu" ? (
-                <MenuTab vendor={selectedVendor} onAddItem={() => setShowAddItemModal(true)} />
+                <MenuTab
+                  vendor={selectedVendor}
+                  onAddItem={() => setShowAddItemModal(true)}
+                  onEditItem={(item) => setEditMenuItem(item)}
+                  onDeleteItem={(item) => setConfirmDeleteItem(item)}
+                />
               ) : null}
               {activeTab === "Documents" ? <DocumentsTab vendor={selectedVendor} /> : null}
               {activeTab === "Activity" ? <ActivityTab vendor={selectedVendor} /> : null}
@@ -431,6 +471,32 @@ const AdminVendorsPage = () => {
             void refreshSelectedVendor();
             showToast("Menu item added successfully", "success");
           }}
+        />
+      ) : null}
+      {editMenuItem ? (
+        <EditItemModal
+          vendor={selectedVendor}
+          item={editMenuItem}
+          showToast={showToast}
+          onClose={() => setEditMenuItem(null)}
+          onSaved={() => {
+            setEditMenuItem(null);
+            void refreshSelectedVendor();
+            showToast("Menu item updated successfully", "success");
+          }}
+        />
+      ) : null}
+      {confirmDeleteItem ? (
+        <ConfirmationModal
+          open
+          title="Delete menu item"
+          description={`Are you sure you want to delete "${confirmDeleteItem.name}"? This action cannot be undone.`}
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          confirming={deletingMenuItemId === confirmDeleteItem.id}
+          danger
+          onConfirm={() => void deleteMenuItem(confirmDeleteItem)}
+          onClose={() => setConfirmDeleteItem(null)}
         />
       ) : null}
       {vendorModalMode ? (
@@ -537,7 +603,17 @@ function OverviewTab({
   );
 }
 
-function MenuTab({ vendor, onAddItem }: { vendor: AdminVendor; onAddItem: () => void }) {
+function MenuTab({
+  vendor,
+  onAddItem,
+  onEditItem,
+  onDeleteItem,
+}: {
+  vendor: AdminVendor;
+  onAddItem: () => void;
+  onEditItem: (item: VendorMenuItem) => void;
+  onDeleteItem: (item: VendorMenuItem) => void;
+}) {
   const menu = vendor.menu ?? [];
 
   return (
@@ -565,7 +641,31 @@ function MenuTab({ vendor, onAddItem }: { vendor: AdminVendor; onAddItem: () => 
                     <p className="mt-1 text-[10px] text-[#6A7282]">{item.description}</p>
                   ) : null}
                 </div>
-                <StatusPill status={item.status} />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditItem(item);
+                    }}
+                    className="rounded-md border border-gray-200 bg-white p-1.5 text-[10px] text-[#6A7282] hover:bg-gray-100"
+                    title="Edit item"
+                  >
+                    <FaPen className="text-[9px]" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteItem(item);
+                    }}
+                    className="rounded-md border border-red-200 bg-white p-1.5 text-[10px] text-red-500 hover:bg-red-50"
+                    title="Delete item"
+                  >
+                    <FaTrash className="text-[9px]" />
+                  </button>
+                  <StatusPill status={item.status} />
+                </div>
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-[10px]">
                 <PriceBox label="Client" value={item.clientPrice} />
@@ -875,6 +975,108 @@ function AddItemModal({
         </div>
 
         <ModalActions cancelLabel="Cancel" actionLabel={saving ? "Processing..." : "Add item"} onCancel={onClose} disabled={saving} />
+      </form>
+    </ModalShell>
+  );
+}
+
+function EditItemModal({
+  vendor,
+  item,
+  showToast,
+  onClose,
+  onSaved,
+}: {
+  vendor: AdminVendor | null;
+  item: VendorMenuItem;
+  showToast: (message: string, type?: "success" | "error" | "info") => void;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+
+  async function submitEdit(formData: FormData) {
+    if (!vendor) return;
+
+    setSaving(true);
+
+    try {
+      const itemName = String(formData.get("itemName") ?? "").trim();
+      const category = String(formData.get("category") ?? "").trim();
+      const clientPrice = String(formData.get("clientPrice") ?? "").trim();
+
+      if (!itemName || !category || !clientPrice) {
+        throw new Error("Please enter item name, category, and client price");
+      }
+
+      const response = await fetch(
+        `${API_BASE_URL}/admin/vendors/${vendor.id}/menu-items/${item.id}`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            itemName,
+            category,
+            clientPrice: Number(clientPrice),
+            mandoPrice: formData.get("mandoPrice")
+              ? Number(formData.get("mandoPrice"))
+              : undefined,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(errorBody?.message ?? "Unable to update menu item");
+      }
+
+      onSaved();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to update menu item", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <ModalShell title="Edit Menu Item" subtitle={`Update "${item.name}" details.`} onClose={onClose}>
+      <form action={submitEdit} noValidate>
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            label="Item name"
+            name="itemName"
+            defaultValue={item.name}
+            placeholder="Jollof rice and chicken"
+          />
+          <FormField
+            label="Category"
+            name="category"
+            defaultValue={item.description ?? ""}
+            placeholder="Rice dishes"
+          />
+          <FormField
+            label="Client's price"
+            name="clientPrice"
+            type="number"
+            defaultValue={String(item.clientPrice)}
+            placeholder="2500"
+          />
+          <FormField
+            label="Mando's price"
+            name="mandoPrice"
+            type="number"
+            defaultValue={String(item.mandoShare)}
+            placeholder="250"
+          />
+        </div>
+
+        <ModalActions
+          cancelLabel="Cancel"
+          actionLabel={saving ? "Saving..." : "Save item"}
+          onCancel={onClose}
+          disabled={saving}
+        />
       </form>
     </ModalShell>
   );

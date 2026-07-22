@@ -18,6 +18,7 @@ const migrations = [
   '0009_long_sheva_callister',
   '0010_combo_campaigns',
   '0011_redundant_tattoo',
+  '0012_add_menu_items_sub_item',
 ]
 
 async function main() {

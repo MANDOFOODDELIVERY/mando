@@ -72,6 +72,22 @@ const menuItemBodySchema = z.object({
   clientPrice: z.coerce.number().int().nonnegative(),
   mandoPrice: z.coerce.number().int().nonnegative().optional(),
   imageUrl: z.url().nullable().optional(),
+  isSubItem: z.boolean().optional(),
+})
+
+const menuItemUpdateBodySchema = z.object({
+  itemName: z.string().trim().min(2).optional(),
+  category: z.string().trim().min(1).optional(),
+  clientPrice: z.coerce.number().int().nonnegative().optional(),
+  mandoPrice: z.coerce.number().int().nonnegative().optional(),
+  imageUrl: z.url().nullable().optional(),
+  isAvailable: z.boolean().optional(),
+  isSubItem: z.boolean().optional(),
+})
+
+const menuItemParamsSchema = z.object({
+  vendorId: z.uuid(),
+  itemId: z.uuid(),
 })
 
 const vendorBodySchema = z.object({
@@ -919,6 +935,7 @@ export async function adminRoutes(app: FastifyInstance) {
         priceAmount: parsedBody.data.clientPrice,
         imageUrl: parsedBody.data.imageUrl || null,
         isAvailable: true,
+        isSubItem: parsedBody.data.isSubItem ?? false,
       })
       .returning({
         id: menuItems.id,
@@ -926,6 +943,7 @@ export async function adminRoutes(app: FastifyInstance) {
         description: menuItems.description,
         priceAmount: menuItems.priceAmount,
         isAvailable: menuItems.isAvailable,
+        isSubItem: menuItems.isSubItem,
       })
 
     return reply.status(201).send({
@@ -942,8 +960,103 @@ export async function adminRoutes(app: FastifyInstance) {
           (parsedBody.data.mandoPrice ??
             calculateCommissionAmount(item.priceAmount, restaurant.platformCommissionBps)),
         status: item.isAvailable ? 'available' : 'unavailable',
+        isSubItem: item.isSubItem,
       },
     })
+  })
+
+  app.patch('/vendors/:vendorId/menu-items/:itemId', async (request, reply) => {
+    const parsedParams = menuItemParamsSchema.safeParse(request.params)
+    const parsedBody = menuItemUpdateBodySchema.safeParse(request.body)
+
+    if (!parsedParams.success || !parsedBody.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please provide valid menu item details.',
+      })
+    }
+
+    const [item] = await database
+      .update(menuItems)
+      .set({
+        name: parsedBody.data.itemName,
+        description: parsedBody.data.category,
+        priceAmount: parsedBody.data.clientPrice,
+        imageUrl: parsedBody.data.imageUrl,
+        isAvailable: parsedBody.data.isAvailable,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(menuItems.id, parsedParams.data.itemId),
+          eq(menuItems.restaurantId, parsedParams.data.vendorId),
+        ),
+      )
+      .returning({
+        id: menuItems.id,
+        name: menuItems.name,
+        description: menuItems.description,
+        priceAmount: menuItems.priceAmount,
+        isAvailable: menuItems.isAvailable,
+      })
+
+    if (!item) {
+      return reply.status(404).send({
+        error: 'menu_item_not_found',
+        message: 'Menu item not found.',
+      })
+    }
+
+    const [restaurant] = await database
+      .select({ platformCommissionBps: restaurants.platformCommissionBps })
+      .from(restaurants)
+      .where(eq(restaurants.id, parsedParams.data.vendorId))
+      .limit(1)
+
+    const mandoShare = parsedBody.data.mandoPrice ??
+      calculateCommissionAmount(item.priceAmount, restaurant?.platformCommissionBps ?? 1000)
+
+    return reply.status(200).send({
+      item: {
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        clientPrice: item.priceAmount,
+        mandoShare,
+        vendorShare: item.priceAmount - mandoShare,
+        status: item.isAvailable ? 'available' : 'unavailable',
+      },
+    })
+  })
+
+  app.delete('/vendors/:vendorId/menu-items/:itemId', async (request, reply) => {
+    const parsedParams = menuItemParamsSchema.safeParse(request.params)
+
+    if (!parsedParams.success) {
+      return reply.status(400).send({
+        error: 'validation_error',
+        message: 'Please choose a valid menu item.',
+      })
+    }
+
+    const [item] = await database
+      .delete(menuItems)
+      .where(
+        and(
+          eq(menuItems.id, parsedParams.data.itemId),
+          eq(menuItems.restaurantId, parsedParams.data.vendorId),
+        ),
+      )
+      .returning({ id: menuItems.id })
+
+    if (!item) {
+      return reply.status(404).send({
+        error: 'menu_item_not_found',
+        message: 'Menu item not found.',
+      })
+    }
+
+    return reply.status(200).send({ ok: true })
   })
 
   app.patch('/vendors/:vendorId/commission', async (request, reply) => {
@@ -2269,7 +2382,6 @@ async function selectAdminFoodCombos() {
       imageUrl: combos.imageUrl,
       priceAmount: combos.priceAmount,
       isFeatured: combos.isFeatured,
-      isPromoCombo: combos.isPromoCombo,
       isAvailable: combos.isAvailable,
       createdAt: combos.createdAt,
       restaurantId: restaurants.id,
@@ -2348,7 +2460,7 @@ async function selectAdminFoodCombos() {
       rating: 0,
       status: comboStatusMap[combo.id] ?? (combo.isAvailable ? 'active' : 'sold out'),
       isFeatured: combo.isFeatured,
-      isPromoCombo: combo.isPromoCombo,
+      isPromoCombo: Boolean(promoComboIds[combo.id]),
       campaign: campaign
         ? {
             id: campaign.id,
@@ -2468,7 +2580,6 @@ async function createAdminFoodCombo(input: z.infer<typeof adminComboBodySchema>)
       priceAmount: input.price,
       imageUrl: input.imageUrl || null,
       isFeatured: input.isFeatured,
-      isPromoCombo: input.isPromoCombo,
       isAvailable: input.status === 'active',
     })
     .returning({ id: combos.id })
@@ -2508,7 +2619,6 @@ async function updateAdminFoodCombo(
       priceAmount: input.price,
       imageUrl: input.imageUrl,
       isFeatured: input.isFeatured,
-      isPromoCombo: input.isPromoCombo,
       isAvailable: input.status ? input.status === 'active' : undefined,
       updatedAt: new Date(),
     })

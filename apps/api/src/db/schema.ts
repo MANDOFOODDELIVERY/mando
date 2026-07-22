@@ -656,12 +656,14 @@ export const menuItems = pgTable(
     priceAmount: moneyAmount('price_amount').notNull(),
     imageUrl: text('image_url'),
     isAvailable: boolean('is_available').notNull().default(true),
+    isSubItem: boolean('is_sub_item').notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
     index('menu_items_restaurant_id_index').on(table.restaurantId),
     index('menu_items_is_available_index').on(table.isAvailable),
+    index('menu_items_is_sub_item_index').on(table.isSubItem),
   ],
 )
 

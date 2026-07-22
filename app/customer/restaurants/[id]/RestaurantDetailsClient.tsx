@@ -38,6 +38,7 @@ type MenuItem = {
   priceAmount: number;
   imageUrl: string | null;
   isAvailable: boolean;
+  isSubItem: boolean;
 };
 
 export type RestaurantDetailsProps = {
@@ -60,6 +61,14 @@ const RestaurantDetailsClient = ({ restaurantId }: RestaurantDetailsProps) => {
   const [loading, setLoading] = useState(true);
   const addItem = useCartStore((s) => s.addItem);
   const showToast = useToastStore((s) => s.showToast);
+
+  const foodItems = useMemo(() => menuItems.filter((item) => !item.isSubItem), [menuItems]);
+  const subItems = useMemo(() => menuItems.filter((item) => item.isSubItem), [menuItems]);
+  const hasSubItems = subItems.length > 0;
+  const selectedSubItemCount = useMemo(
+    () => subItems.reduce((count, item) => count + (selectedQuantities[item.id] ?? 0), 0),
+    [subItems, selectedQuantities],
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -132,6 +141,11 @@ const RestaurantDetailsClient = ({ restaurantId }: RestaurantDetailsProps) => {
   function addCustomComboToCart() {
     if (!restaurant || selectedItems.length === 0) {
       showToast("Please select at least one food item", "error");
+      return;
+    }
+
+    if (hasSubItems && selectedSubItemCount === 0) {
+      showToast("Please select a takeaway/packaging item", "error");
       return;
     }
 
@@ -250,13 +264,52 @@ const RestaurantDetailsClient = ({ restaurantId }: RestaurantDetailsProps) => {
           <p className="text-sm font-semibold text-[#141B34]">Min: {formatNaira(restaurant.minimumOrderAmount)}</p>
         </div>
 
-        {menuItems.length === 0 ? (
+        {foodItems.length === 0 && subItems.length === 0 ? (
           <div className="rounded-3xl bg-white p-6 text-center text-sm text-[#6B6B6B]">
             No food items are available from this restaurant yet.
           </div>
         ) : null}
 
-        {menuItems.map((item) => {
+        {hasSubItems ? (
+          <div className="rounded-3xl border border-amber-100 bg-amber-50 p-4">
+            <h3 className="font-semibold text-[#141B34]">Packaging</h3>
+            <p className="mt-1 text-xs text-[#6B6B6B]">
+              Choose a takeaway bag or packaging item to complete your order.
+            </p>
+            <div className="mt-3 space-y-3">
+              {subItems.map((item) => {
+                const quantity = selectedQuantities[item.id] ?? 0;
+                return (
+                  <div key={item.id} className="flex items-center justify-between gap-3 rounded-2xl bg-white p-3 shadow-sm">
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-sm font-semibold text-[#141B34]">{item.name}</h4>
+                      <p className="text-xs text-[#6B6B6B]">{formatNaira(item.priceAmount)}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(item.id, quantity - 1)}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-sm font-semibold text-[#141B34]"
+                      >
+                        -
+                      </button>
+                      <span className="w-5 text-center text-sm font-semibold">{quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateQuantity(item.id, quantity + 1)}
+                        className="flex h-8 w-8 items-center justify-center rounded-full bg-[#DFB400] text-sm font-semibold text-white"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {foodItems.map((item) => {
           const quantity = selectedQuantities[item.id] ?? 0;
 
           return (

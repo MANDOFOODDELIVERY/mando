@@ -682,6 +682,8 @@ async function getShareableCombos(agentUserId: string) {
         eq(combos.isAvailable, true),
         eq(restaurants.status, 'active'),
         inArray(comboCampaigns.status, ['active', 'scheduled']),
+        sql`(${comboCampaigns.endsAt} IS NULL OR ${comboCampaigns.endsAt} > NOW())`,
+        sql`(${comboCampaigns.startsAt} IS NULL OR ${comboCampaigns.startsAt} <= NOW())`,
       ),
     )
     .orderBy(desc(combos.isFeatured), desc(combos.createdAt))
