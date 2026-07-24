@@ -390,20 +390,6 @@ const Dashboard = () => {
       </div>
 
       <div className="mt-10">
-        <button
-          type="button"
-          onClick={addPromoBundleToCart}
-          className="relative block w-full overflow-hidden rounded-3xl text-left shadow-sm"
-        >
-          <img
-            src={promoBundle.bannerImage}
-            className="h-44 w-full object-cover"
-            alt={promoBundle.title}
-          />
-        </button>
-      </div>
-
-      <div className="mt-10">
         <div className="flex items-center justify-between">
           <h2 className="text-[24px] font-semibold">Combos</h2>
           <Link

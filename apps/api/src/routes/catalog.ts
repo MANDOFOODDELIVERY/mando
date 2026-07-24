@@ -227,8 +227,6 @@ function getRestaurantRows(
 }
 
 async function getCombosForRestaurants(restaurantIds: string[]) {
-  const promoComboIds = await getPromoComboIds()
-
   return database
     .select({
       id: combos.id,
@@ -251,7 +249,6 @@ async function getCombosForRestaurants(restaurantIds: string[]) {
       and(
         eq(combos.isAvailable, true),
         inArray(combos.restaurantId, restaurantIds),
-        promoComboIds.length ? notInArray(combos.id, promoComboIds) : undefined,
       ),
     )
     .groupBy(combos.id, restaurants.id)
@@ -318,12 +315,7 @@ function getComboRows(
     )
   }
 
-  return getPromoComboIds().then((promoComboIds) => {
-    if (!includePromoCombo && !includePromoCombos && promoComboIds.length > 0) {
-      conditions.push(notInArray(combos.id, promoComboIds))
-    }
-
-    return database
+  return database
     .select({
       id: combos.id,
       slug: combos.slug,
@@ -344,7 +336,6 @@ function getComboRows(
     .where(and(...conditions))
     .groupBy(combos.id, restaurants.id)
     .orderBy(asc(restaurants.name), asc(combos.name))
-  })
 }
 
 async function getPromoComboRows() {
